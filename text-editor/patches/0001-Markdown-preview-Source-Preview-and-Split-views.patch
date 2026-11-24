@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Tue, 24 Nov 2026 23:20:15 +0100
+Date: Tue, 24 Nov 2026 23:24:34 +0100
 Subject: [PATCH 01/10] Markdown preview: Source, Preview and Split views
 
 Rendered preview with inline images, HTML blocks, alerts, Mermaid diagrams, code colours, an outline, a scroll map that keeps editor and preview in step, and text that the mouse can select and copy, with tables and code blocks that scroll along with a selection, and clickable bare web addresses.
@@ -9,10 +9,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/src/markdown.rs b/src/markdown.rs
 new file mode 100644
-index 0000000..6499366
+index 0000000..f15f0f2
 --- /dev/null
 +++ b/src/markdown.rs
-@@ -0,0 +1,4948 @@
+@@ -0,0 +1,4977 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! Markdown preview: Source, Preview and Split views for Markdown tabs.
@@ -466,6 +466,8 @@ index 0000000..6499366
 +    /// The file is over [`LARGE_PREVIEW`], this many bytes, and opened in Source instead of this
 +    /// view: a notice offers the preview.
 +    held: Option<(ViewMode, usize)>,
++    /// Not parsed yet: the tab was restored hidden, and parses when it is first shown.
++    pending: bool,
 +    /// A parse on another thread, for text over [`BACKGROUND_PARSE`].
 +    job: Option<Job>,
 +    /// Height of each top-level element in lines of prose, estimated and then measured, when the
@@ -593,6 +595,7 @@ index 0000000..6499366
 +            scroll_speed: None,
 +            pinned: false,
 +            held: None,
++            pending: false,
 +            job: None,
 +            sizes: Vec::new(),
 +            tops: Vec::new(),
@@ -1304,6 +1307,12 @@ index 0000000..6499366
 +impl EditorTab {
 +    /// Start the preview of a file just opened, in the configured view.
 +    pub fn markdown_init(&mut self, default: ViewMode) {
++        self.markdown_init_with(default, false);
++    }
++
++    /// [`Self::markdown_init`]; with `later`, the text is parsed only when the tab is first
++    /// shown ([`Self::markdown_prepare`]): a session restore opens many tabs that stay hidden.
++    pub fn markdown_init_with(&mut self, default: ViewMode, later: bool) {
 +        let (empty, len) = self.editor.lock().unwrap().with_buffer(|buffer| {
 +            (
 +                buffer.lines.iter().all(|line| line.text().is_empty()),
@@ -1322,8 +1331,27 @@ index 0000000..6499366
 +            }
 +            preview
 +        });
++        if later {
++            if let Some(preview) = self.markdown.as_mut() {
++                preview.pending = true;
++            }
++            return;
++        }
 +        self.markdown_refresh();
 +    }
++
++    /// Parse a preview left for later, now that its tab is shown.
++    pub fn markdown_prepare(&mut self) {
++        if self.markdown.as_ref().is_some_and(|preview| preview.pending) {
++            self.markdown_refresh();
++        }
++    }
++
++    /// The preview waits to be parsed until its tab is shown.
++    pub fn markdown_pending(&self) -> bool {
++        self.markdown.as_ref().is_some_and(|preview| preview.pending)
++    }
++
 +
 +    /// The tab was saved under a new path: its language follows (see
 +    /// `language_path_changed`); keep the current view, resolve images again.
@@ -1374,6 +1402,7 @@ index 0000000..6499366
 +        let Some(preview) = self.markdown.as_mut() else {
 +            return;
 +        };
++        preview.pending = false;
 +        // One parse at a time: when it is done, the text is read again. Not copied meanwhile,
 +        // which takes long for a large file
 +        if preview.job.is_some() && buffer_len(&self.editor.lock().unwrap()) > BACKGROUND_PARSE {

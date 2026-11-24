@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Tue, 24 Nov 2026 23:20:15 +0100
+Date: Tue, 24 Nov 2026 23:24:34 +0100
 Subject: [PATCH 09/10] Our text box, menu, key and message code
 
 The text box drawing and keys, underlined links that open on double-click, scrolling along with a mouse selection, our menus, key bindings and update arms, kept in our own files next to the upstream ones they extend.
@@ -1192,10 +1192,10 @@ index 0000000..4dd4d4b
 +}
 diff --git a/src/shell.rs b/src/shell.rs
 new file mode 100644
-index 0000000..dd691f7
+index 0000000..9bfc87e
 --- /dev/null
 +++ b/src/shell.rs
-@@ -0,0 +1,145 @@
+@@ -0,0 +1,147 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! The application COSMIC runs: [`App`] with our step after every message.
@@ -1225,6 +1225,8 @@ index 0000000..dd691f7
 +        let raise = matches!(message, Message::Find(Some(_)));
 +        let task = <App as Application>::update(self, message);
 +        let task = self.views_after_update(task);
++        // A restored tab parses its Markdown when it is first shown
++        self.markdown_prepare_shown();
 +        Task::batch([task, self.find_window_sync(raise)])
 +    }
 +}

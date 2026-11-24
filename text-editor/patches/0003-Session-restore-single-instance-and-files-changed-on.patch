@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Tue, 24 Nov 2026 23:20:15 +0100
+Date: Tue, 24 Nov 2026 23:24:34 +0100
 Subject: [PATCH 03/10] Session restore, single instance and files changed on
  disk
 
@@ -849,10 +849,10 @@ index 0000000..aeca7c1
 +}
 diff --git a/src/session.rs b/src/session.rs
 new file mode 100644
-index 0000000..5983ac3
+index 0000000..71fdd46
 --- /dev/null
 +++ b/src/session.rs
-@@ -0,0 +1,2066 @@
+@@ -0,0 +1,2079 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! Session restore: open tabs, and the unsaved text in them, come back on the next start.
@@ -1559,6 +1559,9 @@ index 0000000..5983ac3
 +    applied: u64,
 +    /// The main window, saved with every snapshot.
 +    window: Option<WindowGeometry>,
++    /// The last session is being reopened: the file watcher and the recent files are updated
++    /// once at the end, not for every tab.
++    pub(crate) restoring: bool,
 +}
 +
 +impl Session {
@@ -1708,6 +1711,7 @@ index 0000000..5983ac3
 +            },
 +        );
 +        let mut entities = Vec::new();
++        self.session.restoring = true;
 +        for (saved_tab, plan) in saved.tabs.iter().zip(plans) {
 +            let entity = match &plan {
 +                Restore::Skip => {
@@ -1790,7 +1794,10 @@ index 0000000..5983ac3
 +            if let (Some(mode), Some(preview)) = (saved_tab.markdown_view, tab.markdown.as_mut()) {
 +                preview.mode = mode;
 +            }
-+            tab.markdown_refresh();
++            // A hidden tab parses when it is first shown
++            if !tab.markdown_pending() {
++                tab.markdown_refresh();
++            }
 +            let title = tab.title();
 +            let title = if tab.changed() {
 +                format!("{title} \u{2022}")
@@ -1798,6 +1805,11 @@ index 0000000..5983ac3
 +                title
 +            };
 +            self.tab_model.text_set(entity, title);
++        }
++        self.session.restoring = false;
++        self.update_watcher();
++        if entities.iter().any(Option::is_some) {
++            self.save_config_state();
 +        }
 +        let active = active.and_then(|i| entities.get(i).copied().flatten());
 +        if let Some(entity) = active {
@@ -1825,6 +1837,7 @@ index 0000000..5983ac3
 +            }
 +        }
 +        self.session.store = Some(Arc::new(Mutex::new(store)));
++        self.markdown_prepare_shown();
 +    }
 +
 +    /// Copy the current tabs and the unsaved text of every modified tab: edits can come from
