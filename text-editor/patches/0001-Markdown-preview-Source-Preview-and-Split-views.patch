@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Tue, 24 Nov 2026 23:14:13 +0100
+Date: Tue, 24 Nov 2026 23:20:15 +0100
 Subject: [PATCH 01/10] Markdown preview: Source, Preview and Split views
 
 Rendered preview with inline images, HTML blocks, alerts, Mermaid diagrams, code colours, an outline, a scroll map that keeps editor and preview in step, and text that the mouse can select and copy, with tables and code blocks that scroll along with a selection, and clickable bare web addresses.
@@ -9,7 +9,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/src/markdown.rs b/src/markdown.rs
 new file mode 100644
-index 0000000..0b885ab
+index 0000000..6499366
 --- /dev/null
 +++ b/src/markdown.rs
 @@ -0,0 +1,4948 @@
@@ -3061,7 +3061,7 @@ index 0000000..0b885ab
 +
 +/// How much Ctrl+Plus and Ctrl+Minus scale the preview: its text size against the default.
 +/// Exactly 1 at the default zoom.
-+fn zoom_factor(config: &crate::Config, zoom_adj: i8) -> f32 {
++pub(crate) fn zoom_factor(config: &crate::Config, zoom_adj: i8) -> f32 {
 +    config.font_size_adjusted(zoom_adj) / config.font_size_adjusted(0)
 +}
 +

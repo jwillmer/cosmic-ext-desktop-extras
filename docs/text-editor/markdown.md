@@ -89,7 +89,11 @@ Mermaid diagrams and the 860 px page column. A picture is as wide as at the defa
 factor, so zooming in can make it wider than its own size and the window; then it sits in its own
 sideways scroll strip and the rest of the page keeps wrapping to the window (the mouse wheel still
 scrolls the page over it). `<img>` with a width or height scales by the factor too. At the default
-zoom nothing changes.
+zoom nothing changes. Ctrl+0 resets the zoom. The status bar (View, Status bar) shows the tab's
+zoom in percent; a click opens a popup with − and + (one zoom step each, the popup stays open),
+Reset, and the levels 50, 75, 100, 125, 150, 200, 300 and 400 %. A level picks the zoom step
+closest to it, so the shown percent can differ a little (125 % is 129 % with the default 14 px font
+and 1 px steps).
 
 Code blocks with a language tag (`json`, `bash`, `python`, `rust`, ...) get syntax colours from the
 editor's own syntax set and syntax theme, so they look as in Source and follow the light/dark
