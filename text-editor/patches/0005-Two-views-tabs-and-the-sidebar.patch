@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Fri, 20 Nov 2026 14:40:50 +0100
+Date: Wed, 25 Nov 2026 00:00:58 +0100
 Subject: [PATCH 05/10] Two views, tabs and the sidebar
 
 Two views side by side with move, clone and drag, Close all / others / to the right, the tab bar per view and a resizable sidebar.
@@ -35,10 +35,10 @@ index 0000000..d1cfd8d
 +}
 diff --git a/src/app_tabs.rs b/src/app_tabs.rs
 new file mode 100644
-index 0000000..2099f32
+index 0000000..57811b0
 --- /dev/null
 +++ b/src/app_tabs.rs
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,63 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! Opening a file in a new tab.
@@ -49,6 +49,7 @@ index 0000000..2099f32
 +use crate::{
 +    App, markdown,
 +    tab::{EditorTab, Tab},
++    views::Side,
 +};
 +
 +impl App {
@@ -63,8 +64,25 @@ index 0000000..2099f32
 +        let mut tab = EditorTab::new(&self.config);
 +        tab.open(path);
 +        tab.path_opt.as_ref()?;
-+        tab.markdown_init(markdown_view.unwrap_or(self.config.markdown_view));
++        tab.markdown_init_with(
++            markdown_view.unwrap_or(self.config.markdown_view),
++            self.session.restoring,
++        );
 +        Some(self.insert_tab(tab))
++    }
++
++    /// Parse the previews of the tabs on screen that were left for later (see
++    /// `EditorTab::markdown_init_with`): the active tab and the tab shown in each view.
++    pub fn markdown_prepare_shown(&mut self) {
++        let mut shown = vec![self.tab_model.active()];
++        if let Some(split) = &self.split {
++            shown.extend([Side::Left, Side::Right].iter().filter_map(|side| split.shown(*side)));
++        }
++        for entity in shown {
++            if let Some(Tab::Editor(tab)) = self.tab_model.data_mut::<Tab>(entity) {
++                tab.markdown_prepare();
++            }
++        }
 +    }
 +
 +    pub fn insert_tab(&mut self, tab: EditorTab) -> segmented_button::Entity {
@@ -77,7 +95,10 @@ index 0000000..2099f32
 +            .closable()
 +            .activate()
 +            .id();
-+        self.update_watcher();
++        // A session restore updates the watcher once at its end
++        if !self.session.restoring {
++            self.update_watcher();
++        }
 +        entity
 +    }
 +}

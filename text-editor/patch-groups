@@ -7,7 +7,7 @@ body: Rendered preview with inline images, HTML blocks, alerts, Mermaid diagrams
 body: Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 files: src/markdown.rs src/markdown_highlight.rs src/markdown_html.rs src/markdown_map.rs
 files: src/markdown_mermaid.rs src/markdown_remote.rs src/selectable_rich.rs
-files: src/markdown_links.rs
+files: src/markdown_links.rs src/markdown_zoom.rs
 
 subject: Markdown editing: slash menu, formatting, lists and tables
 body: The / command menu, Ctrl+B and Ctrl+I, typing helpers for lists, links and code, table navigation and the shortcuts panel.

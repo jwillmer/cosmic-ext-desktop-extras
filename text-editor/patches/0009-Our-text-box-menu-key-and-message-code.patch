@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Fri, 20 Nov 2026 14:40:50 +0100
+Date: Wed, 25 Nov 2026 00:00:58 +0100
 Subject: [PATCH 09/10] Our text box, menu, key and message code
 
 The text box drawing and keys, underlined links that open on double-click, scrolling along with a mouse selection, our menus, key bindings and update arms, kept in our own files next to the upstream ones they extend.
@@ -9,10 +9,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/src/app_update.rs b/src/app_update.rs
 new file mode 100644
-index 0000000..4e15478
+index 0000000..9864fbf
 --- /dev/null
 +++ b/src/app_update.rs
-@@ -0,0 +1,421 @@
+@@ -0,0 +1,435 @@
 +//! Our messages in [`App::update`]: the arms for the messages upstream does not have, so
 +//! upstream's `update` keeps one hook arm and its own arms.
 +
@@ -44,6 +44,20 @@ index 0000000..4e15478
 +            };
 +        }
 +        match message {
++            Message::ZoomPopup(open) => self.zoom_popup = open,
++            Message::ZoomTab(entity, steps) => {
++                if let Some(Tab::Editor(tab)) = self.tab_model.data_mut::<Tab>(entity) {
++                    tab.set_zoom_adj(tab.zoom_adj().saturating_add(steps));
++                    tab.set_config(&self.config);
++                }
++            }
++            Message::ZoomTo(zoom_adj) => {
++                let entity = self.tab_model.active();
++                if let Some(Tab::Editor(tab)) = self.tab_model.data_mut::<Tab>(entity) {
++                    tab.set_zoom_adj(zoom_adj);
++                    tab.set_config(&self.config);
++                }
++            }
 +            Message::CloseTabs(message) => return self.update_close_tabs(message),
 +            Message::Views(message) => return self.update_views(message),
 +            Message::FindResults(message) => return self.update_find_results(message),
@@ -1184,10 +1198,10 @@ index 0000000..4dd4d4b
 +}
 diff --git a/src/shell.rs b/src/shell.rs
 new file mode 100644
-index 0000000..dd691f7
+index 0000000..9bfc87e
 --- /dev/null
 +++ b/src/shell.rs
-@@ -0,0 +1,145 @@
+@@ -0,0 +1,147 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! The application COSMIC runs: [`App`] with our step after every message.
@@ -1217,6 +1231,8 @@ index 0000000..dd691f7
 +        let raise = matches!(message, Message::Find(Some(_)));
 +        let task = <App as Application>::update(self, message);
 +        let task = self.views_after_update(task);
++        // A restored tab parses its Markdown when it is first shown
++        self.markdown_prepare_shown();
 +        Task::batch([task, self.find_window_sync(raise)])
 +    }
 +}

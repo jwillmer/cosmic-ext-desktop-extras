@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Fri, 20 Nov 2026 14:40:50 +0100
+Date: Wed, 25 Nov 2026 00:00:58 +0100
 Subject: [PATCH 10/10] Hook our features into the upstream files
 
 The only patch that changes upstream files: module lines, struct fields, one-line calls into our modules, menu entries, key bindings, strings and dependencies. Everything else lives in our own files, so an upstream release conflicts here alone.
@@ -57,7 +57,7 @@ index 955992c..48a4161 100644
 +[patch."https://github.com/pop-os/cosmic-files.git"]
 +cosmic-files = { path = "../cosmic-files" }
 diff --git a/i18n/en/cosmic_edit.ftl b/i18n/en/cosmic_edit.ftl
-index 1cb1c8b..69e4b34 100644
+index 1cb1c8b..7df1392 100644
 --- a/i18n/en/cosmic_edit.ftl
 +++ b/i18n/en/cosmic_edit.ftl
 @@ -63,6 +63,7 @@ find-next = Find next
@@ -68,7 +68,7 @@ index 1cb1c8b..69e4b34 100644
  case-sensitive = Case sensitive
  use-regex = Use regex
  wrap-around = Wrap around
-@@ -121,3 +122,244 @@ syntax-highlighting = Syntax highlighting...
+@@ -121,3 +122,249 @@ syntax-highlighting = Syntax highlighting...
  menu-settings = Settings...
  menu-keyboard-shortcuts = Keyboard shortcuts...
  menu-about = About COSMIC Text Editor...
@@ -313,11 +313,66 @@ index 1cb1c8b..69e4b34 100644
 +    *[other] {$text} words
 +}
 +status-spaces = Spaces: {$width}
++status-zoom = {$percent}%
++zoom-out-tooltip = Zoom out ({$keys})
++zoom-in-tooltip = Zoom in ({$keys})
++zoom-reset = Reset
++zoom-reset-tooltip = Reset zoom ({$keys})
 diff --git a/src/config.rs b/src/config.rs
-index 3eaaac0..34211b5 100644
+index 3eaaac0..fe16252 100644
 --- a/src/config.rs
 +++ b/src/config.rs
-@@ -52,6 +52,27 @@ pub struct Config {
+@@ -6,7 +6,32 @@ use cosmic::{
+ };
+ use cosmic_text::Metrics;
+ use serde::{Deserialize, Serialize};
+-use std::{collections::VecDeque, path::PathBuf};
++use std::{
++    collections::VecDeque,
++    path::PathBuf,
++    sync::atomic::{AtomicU8, Ordering},
++};
++
++/// Whether the system theme is dark, read once: reading it loads the whole theme from disk, and
++/// every new tab asks. 0 = not read yet, 1 = light, 2 = dark.
++static SYSTEM_DARK: AtomicU8 = AtomicU8::new(0);
++
++/// Forget the cached system dark mode: the system theme or the config changed.
++pub fn system_theme_changed() {
++    SYSTEM_DARK.store(0, Ordering::Relaxed);
++}
++
++fn system_is_dark() -> bool {
++    match SYSTEM_DARK.load(Ordering::Relaxed) {
++        1 => false,
++        2 => true,
++        _ => {
++            let dark = theme::system_preference().theme_type.is_dark();
++            SYSTEM_DARK.store(if dark { 2 } else { 1 }, Ordering::Relaxed);
++            dark
++        }
++    }
++}
+ 
+ pub const CONFIG_VERSION: u64 = 1;
+ 
+@@ -33,6 +58,15 @@ impl AppTheme {
+             Self::System => theme::system_preference(),
+         }
+     }
++
++    /// Dark or light, without loading a theme for a fixed choice
++    pub fn is_dark(&self) -> bool {
++        match self {
++            Self::Dark => true,
++            Self::Light => false,
++            Self::System => system_is_dark(),
++        }
++    }
+ }
+ 
+ #[derive(Clone, CosmicConfigEntry, Debug, Deserialize, Eq, PartialEq, Serialize)]
+@@ -52,6 +86,27 @@ pub struct Config {
      pub tab_width: u16,
      pub vim_bindings: bool,
      pub word_wrap: bool,
@@ -345,7 +400,7 @@ index 3eaaac0..34211b5 100644
  }
  
  impl Default for Config {
-@@ -72,6 +93,22 @@ impl Default for Config {
+@@ -72,6 +127,22 @@ impl Default for Config {
              tab_width: 4,
              vim_bindings: false,
              word_wrap: true,
@@ -368,7 +423,7 @@ index 3eaaac0..34211b5 100644
          }
      }
  }
-@@ -84,16 +121,6 @@ impl Config {
+@@ -84,16 +155,6 @@ impl Config {
          (font_size + adj * adj_step).max(1.0)
      }
  
@@ -385,6 +440,15 @@ index 3eaaac0..34211b5 100644
      // Calculate metrics from font size
      pub fn metrics(&self, zoom_adj: i8) -> Metrics {
          let font_size = self.font_size_adjusted(zoom_adj);
+@@ -103,7 +164,7 @@ impl Config {
+ 
+     // Get current syntax theme based on dark mode
+     pub fn syntax_theme(&self) -> &str {
+-        let dark = self.app_theme.theme().theme_type.is_dark();
++        let dark = self.app_theme.is_dark();
+         if dark {
+             &self.syntax_theme_dark
+         } else {
 diff --git a/src/key_bind.rs b/src/key_bind.rs
 index 0e2032f..8acd1e2 100644
 --- a/src/key_bind.rs
@@ -406,7 +470,7 @@ index 0e2032f..8acd1e2 100644
      key_binds
  }
 diff --git a/src/main.rs b/src/main.rs
-index 7181f68..fd5ea47 100644
+index 7181f68..c5f890b 100644
 --- a/src/main.rs
 +++ b/src/main.rs
 @@ -16,16 +16,16 @@ use cosmic::{
@@ -610,7 +674,7 @@ index 7181f68..fd5ea47 100644
      SelectAll,
      Surface(surface::Action<Message>),
      SystemThemeModeChange(cosmic_theme::ThemeMode),
-@@ -431,6 +540,66 @@ pub enum Message {
+@@ -431,6 +540,73 @@ pub enum Message {
      Undo,
      UpdateGitProjectStatus,
      VimBindings(bool),
@@ -668,6 +732,13 @@ index 7181f68..fd5ea47 100644
 +    StatusBarCount(segmented_button::Entity, u64),
 +    /// The status bar's note after line ending conversion `.0` has been shown long enough
 +    LineEndingNoteEnd(u64),
++    /// Open or close the status bar's zoom popup.
++    ZoomPopup(bool),
++    /// Set the active tab's zoom adjustment: a preset level of the zoom popup.
++    ZoomTo(i8),
++    /// Zoom tab `.0` by `.1` steps (Ctrl+wheel over its preview, also in the view that is not
++    /// active), positive in.
++    ZoomTab(segmented_button::Entity, i8),
 +    ToggleShowLineEndings,
 +    ToggleShowWhitespace,
 +    /// Show or hide the status bar; `None` flips it.
@@ -677,7 +748,7 @@ index 7181f68..fd5ea47 100644
  }
  
  #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-@@ -438,15 +607,30 @@ pub enum ContextPage {
+@@ -438,15 +614,30 @@ pub enum ContextPage {
      About,
      DocumentStatistics,
      GitManagement,
@@ -708,7 +779,7 @@ index 7181f68..fd5ea47 100644
  }
  
  #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-@@ -475,15 +659,40 @@ pub struct App {
+@@ -475,15 +666,42 @@ pub struct App {
      theme_names: Vec<String>,
      context_page: ContextPage,
      text_box_id: widget::Id,
@@ -746,11 +817,13 @@ index 7181f68..fd5ea47 100644
 +    /// The status bar's note after a line ending conversion: the tab, its new ending and which
 +    /// conversion it was, so that the timer of an earlier one does not end it early.
 +    line_ending_note: Option<(segmented_button::Entity, LineEnding, u64)>,
++    /// The status bar's zoom popup is open.
++    zoom_popup: bool,
 +    line_ending_conversions: u64,
      projects: Vec<(String, PathBuf)>,
      project_search_id: widget::Id,
      project_search_value: String,
-@@ -494,6 +703,21 @@ pub struct App {
+@@ -494,6 +712,21 @@ pub struct App {
          HashSet<(PathBuf, RecursiveMode)>,
      )>,
      modifiers: Modifiers,
@@ -772,7 +845,7 @@ index 7181f68..fd5ea47 100644
  }
  
  #[derive(Debug, Clone, Copy)]
-@@ -629,19 +853,7 @@ impl App {
+@@ -629,19 +862,7 @@ impl App {
      pub fn open_tab(&mut self, path_opt: Option<PathBuf>) -> Option<segmented_button::Entity> {
          match self.new_tab(path_opt)? {
              NewTab::Exists(entity) => Some(entity),
@@ -793,7 +866,7 @@ index 7181f68..fd5ea47 100644
          }
      }
  
-@@ -685,16 +897,13 @@ impl App {
+@@ -685,16 +906,13 @@ impl App {
                  };
  
                  //TODO: allow files to be open multiple times
@@ -816,25 +889,34 @@ index 7181f68..fd5ea47 100644
                      self.tab_model.activate(entity);
                      return Some(NewTab::Exists(entity));
                  }
-@@ -703,6 +912,7 @@ impl App {
+@@ -703,6 +921,7 @@ impl App {
  
                  let mut tab = EditorTab::new(&self.config);
                  tab.open(canonical);
-+                tab.markdown_init(self.config.markdown_view);
++                tab.markdown_init_with(self.config.markdown_view, self.session.restoring);
                  Some(NewTab::Tab(tab))
              }
              None => Some(NewTab::Tab(EditorTab::new(&self.config))),
-@@ -719,6 +929,9 @@ impl App {
+@@ -715,10 +934,17 @@ impl App {
+             .recent_files
+             .push_front(canonical.to_path_buf());
+         self.config_state.recent_files.truncate(10);
+-        self.save_config_state();
++        // A session restore saves the list once at its end
++        if !self.session.restoring {
++            self.save_config_state();
++        }
      }
  
      fn update_config(&mut self) -> Task<Message> {
++        config::system_theme_changed();
 +        markdown::remote::set_enabled(self.config.markdown_remote_images);
 +        // A find option may have changed: count at once, nothing is being typed
 +        let _ = self.find_query_changed(true);
          //TODO: provide iterator over data
          let entities: Vec<_> = self.tab_model.iter().collect();
          for entity in entities {
-@@ -796,13 +1009,14 @@ impl App {
+@@ -796,13 +1022,14 @@ impl App {
                      self.dialog_page_opt = Some(DialogPage::PromptSaveQuit(unsaved));
                  }
              }
@@ -850,7 +932,7 @@ index 7181f68..fd5ea47 100644
              match self.context_page {
                  ContextPage::ProjectSearch if self.project_search_has_focus => {
                      widget::text_input::focus(self.project_search_id.clone())
-@@ -816,6 +1030,12 @@ impl App {
+@@ -816,6 +1043,12 @@ impl App {
               }| has_focus,
          ) {
              widget::text_input::focus(self.find_search_id.clone())
@@ -863,7 +945,7 @@ index 7181f68..fd5ea47 100644
          } else {
              widget::text_input::focus(self.text_box_id.clone())
          }
-@@ -892,6 +1112,7 @@ impl App {
+@@ -892,6 +1125,7 @@ impl App {
      // Call this any time the tab changes
      pub fn update_tab(&mut self) -> Task<Message> {
          self.update_nav_bar_active();
@@ -871,7 +953,7 @@ index 7181f68..fd5ea47 100644
  
          let title = match self.active_tab() {
              Some(tab) => {
-@@ -912,6 +1133,9 @@ impl App {
+@@ -912,6 +1146,9 @@ impl App {
                  Task::none()
              },
              self.update_focus(),
@@ -881,7 +963,7 @@ index 7181f68..fd5ea47 100644
          ])
      }
  
-@@ -1370,7 +1594,16 @@ impl App {
+@@ -1370,7 +1607,16 @@ impl App {
                          }),
                      ),
                  )
@@ -898,7 +980,7 @@ index 7181f68..fd5ea47 100644
              widget::settings::section()
                  .title(fl!("keyboard-shortcuts"))
                  .add(
-@@ -1476,6 +1709,7 @@ impl Application for App {
+@@ -1476,6 +1722,7 @@ impl Application for App {
                  ),
              ]);
  
@@ -906,7 +988,7 @@ index 7181f68..fd5ea47 100644
          let mut app = App {
              core,
              about,
-@@ -1497,13 +1731,26 @@ impl Application for App {
+@@ -1497,13 +1744,27 @@ impl Application for App {
              text_box_id: widget::Id::unique(),
              auto_scroll: None,
              dialog_opt: None,
@@ -929,11 +1011,12 @@ index 7181f68..fd5ea47 100644
 +            find_in_selection: false,
              git_project_status: None,
 +            line_ending_note: None,
++            zoom_popup: false,
 +            line_ending_conversions: 0,
              projects: Vec::new(),
              project_search_id: widget::Id::unique(),
              project_search_value: String::new(),
-@@ -1511,10 +1758,19 @@ impl Application for App {
+@@ -1511,10 +1772,19 @@ impl Application for App {
              project_search_has_focus: false,
              watcher_opt: None,
              modifiers: Modifiers::empty(),
@@ -953,7 +1036,7 @@ index 7181f68..fd5ea47 100644
          for arg in env::args().skip(1) {
              let path = PathBuf::from(arg);
              if path.is_dir() {
-@@ -1532,7 +1788,7 @@ impl Application for App {
+@@ -1532,7 +1802,7 @@ impl Application for App {
          }
  
          //TODO: try update_config here? It breaks loading system theme by default
@@ -962,7 +1045,7 @@ index 7181f68..fd5ea47 100644
          (app, command)
      }
  
-@@ -1551,7 +1807,7 @@ impl Application for App {
+@@ -1551,7 +1821,7 @@ impl Application for App {
              ..
          } = self.core().system_theme().cosmic().spacing;
  
@@ -971,7 +1054,7 @@ index 7181f68..fd5ea47 100644
              .button_height(space_xxxs + 20 /* line height */ + space_xxxs)
              .button_padding([space_s, space_xxxs, space_s, space_xxxs])
              .button_spacing(space_xxxs)
-@@ -1562,13 +1818,48 @@ impl Application for App {
+@@ -1562,13 +1832,48 @@ impl Application for App {
              .padding(space_s)
              .width(Length::Shrink);
  
@@ -1024,7 +1107,7 @@ index 7181f68..fd5ea47 100644
                  .height(Length::Fill)
                  .class(theme::Container::custom(nav_bar::nav_bar_style))
                  .into(),
-@@ -1590,12 +1881,13 @@ impl Application for App {
+@@ -1590,12 +1895,13 @@ impl Application for App {
  
      //TODO: currently the first escape unfocuses, and the second calls this function
      fn on_escape(&mut self) -> Task<Message> {
@@ -1042,7 +1125,7 @@ index 7181f68..fd5ea47 100644
          }
  
          // Focus correct widget
-@@ -1723,6 +2015,23 @@ impl Application for App {
+@@ -1723,6 +2029,23 @@ impl Application for App {
  
                  Some(dialog.into())
              }
@@ -1066,7 +1149,7 @@ index 7181f68..fd5ea47 100644
          }
      }
  
-@@ -1748,20 +2057,23 @@ impl Application for App {
+@@ -1748,20 +2071,23 @@ impl Application for App {
                  }
              };
          }
@@ -1098,7 +1181,7 @@ index 7181f68..fd5ea47 100644
              }
              Message::Config(config) => {
                  if config != self.config {
-@@ -1821,24 +2133,45 @@ impl Application for App {
+@@ -1821,24 +2147,45 @@ impl Application for App {
              }
              Message::Copy => {
                  if let Some(Tab::Editor(tab)) = self.active_tab() {
@@ -1151,7 +1234,7 @@ index 7181f68..fd5ea47 100644
                          return Task::batch([
                              clipboard::write(selection),
                              self.update(Message::TabChanged(self.tab_model.active())),
-@@ -1927,10 +2260,16 @@ impl Application for App {
+@@ -1927,10 +2274,16 @@ impl Application for App {
                  }
              }
              Message::Find(find_opt) => {
@@ -1172,7 +1255,7 @@ index 7181f68..fd5ea47 100644
  
                  // Focus correct input
                  return self.update_focus();
-@@ -1945,9 +2284,20 @@ impl Application for App {
+@@ -1945,9 +2298,20 @@ impl Application for App {
                  {
                      //TODO: do not compile find regex on every search?
                      match self.config.find_regex(&self.find_search_value) {
@@ -1196,7 +1279,7 @@ index 7181f68..fd5ea47 100644
                          Err(err) => {
                              //TODO: put regex error in find box
                              log::warn!(
-@@ -1968,9 +2318,20 @@ impl Application for App {
+@@ -1968,9 +2332,20 @@ impl Application for App {
                  {
                      //TODO: do not compile find regex on every search?
                      match self.config.find_regex(&self.find_search_value) {
@@ -1220,7 +1303,7 @@ index 7181f68..fd5ea47 100644
                          Err(err) => {
                              //TODO: put regex error in find box
                              log::warn!(
-@@ -1992,12 +2353,24 @@ impl Application for App {
+@@ -1992,12 +2367,24 @@ impl Application for App {
                      //TODO: do not compile find regex on every search?
                      match self.config.find_regex(&self.find_search_value) {
                          Ok(regex) => {
@@ -1251,7 +1334,7 @@ index 7181f68..fd5ea47 100644
                              return self.update(Message::TabChanged(self.tab_model.active()));
                          }
                          Err(err) => {
-@@ -2021,12 +2394,30 @@ impl Application for App {
+@@ -2021,12 +2408,30 @@ impl Application for App {
                      //TODO: do not compile find regex on every search?
                      match self.config.find_regex(&self.find_search_value) {
                          Ok(regex) => {
@@ -1287,7 +1370,7 @@ index 7181f68..fd5ea47 100644
                              return self.update(Message::TabChanged(self.tab_model.active()));
                          }
                          Err(err) => {
-@@ -2048,6 +2439,7 @@ impl Application for App {
+@@ -2048,6 +2453,7 @@ impl Application for App {
              }
              Message::FindSearchValueChanged(value) => {
                  self.find_search_value = value;
@@ -1295,7 +1378,7 @@ index 7181f68..fd5ea47 100644
              }
              Message::FindUseRegex(find_use_regex) => {
                  config_set!(find_use_regex, find_use_regex);
-@@ -2064,6 +2456,10 @@ impl Application for App {
+@@ -2064,6 +2470,10 @@ impl Application for App {
                          has_focus,
                      };
                  }
@@ -1306,7 +1389,7 @@ index 7181f68..fd5ea47 100644
                  if !has_focus {
                      self.project_search_has_focus = false;
                      return self.update_focus();
-@@ -2134,12 +2530,42 @@ impl Application for App {
+@@ -2134,12 +2544,42 @@ impl Application for App {
                      |x| x,
                  );
              }
@@ -1351,7 +1434,7 @@ index 7181f68..fd5ea47 100644
              }
              Message::LaunchUrl(url) => match open::that_detached(&url) {
                  Ok(()) => {}
-@@ -2157,7 +2583,12 @@ impl Application for App {
+@@ -2157,7 +2597,12 @@ impl Application for App {
              Message::NewWindow => {
                  //TODO: support multi-window in winit
                  match env::current_exe() {
@@ -1365,7 +1448,7 @@ index 7181f68..fd5ea47 100644
                          Ok(_child) => {}
                          Err(err) => {
                              log::error!("failed to execute {:?}: {}", exe, err);
-@@ -2172,29 +2603,21 @@ impl Application for App {
+@@ -2172,29 +2617,21 @@ impl Application for App {
                  // Do nothing
              }
              Message::NotifyEvent(event) => {
@@ -1402,7 +1485,7 @@ index 7181f68..fd5ea47 100644
                  }
  
                  // Reload folders that changed
-@@ -2352,6 +2775,7 @@ impl Application for App {
+@@ -2352,6 +2789,7 @@ impl Application for App {
                      for entity in self.tab_model.iter() {
                          if let Some(Tab::GitDiff(other_tab)) = self.tab_model.data::<Tab>(entity)
                              && other_tab.diff.path == diff.path
@@ -1410,7 +1493,7 @@ index 7181f68..fd5ea47 100644
                          {
                              close.push(entity);
                          }
-@@ -2384,7 +2808,11 @@ impl Application for App {
+@@ -2384,7 +2822,11 @@ impl Application for App {
                  );
                  let icon =
                      icon::icon(mime_icon(mime_for_path(&diff.path, None, false), 16)).size(16);
@@ -1423,7 +1506,7 @@ index 7181f68..fd5ea47 100644
                  self.tab_model
                      .insert()
                      .text(tab.title())
-@@ -2475,9 +2903,22 @@ impl Application for App {
+@@ -2475,9 +2917,22 @@ impl Application for App {
                  if let Some(Tab::Editor(tab)) = self.active_tab() {
                      {
                          let mut editor = tab.editor.lock().unwrap();
@@ -1449,7 +1532,7 @@ index 7181f68..fd5ea47 100644
                      }
                      return self.update(Message::TabChanged(self.tab_model.active()));
                  }
-@@ -2570,6 +3011,7 @@ impl Application for App {
+@@ -2570,6 +3025,7 @@ impl Application for App {
                  if let Some(Tab::Editor(tab)) = self.active_tab() {
                      {
                          let mut editor = tab.editor.lock().unwrap();
@@ -1457,7 +1540,7 @@ index 7181f68..fd5ea47 100644
                          editor.redo();
                      }
  
-@@ -2584,10 +3026,9 @@ impl Application for App {
+@@ -2584,10 +3040,9 @@ impl Application for App {
                  _ = self.tab_model.reorder(dragged, target, position);
              }
              Message::RevertAllChanges => {
@@ -1471,7 +1554,7 @@ index 7181f68..fd5ea47 100644
                  }
              }
              Message::Save(entity_opt) => {
-@@ -2611,7 +3052,7 @@ impl Application for App {
+@@ -2611,7 +3066,7 @@ impl Application for App {
                  if let Some(title) = title_opt {
                      self.tab_model.text_set(self.tab_model.active(), title);
                  }
@@ -1480,7 +1563,7 @@ index 7181f68..fd5ea47 100644
              }
              Message::SaveAll => {
                  let entities: Vec<_> = self.tab_model.iter().collect();
-@@ -2630,7 +3071,10 @@ impl Application for App {
+@@ -2630,7 +3085,10 @@ impl Application for App {
                          }
                      }
                  }
@@ -1492,7 +1575,7 @@ index 7181f68..fd5ea47 100644
              }
              Message::SaveAsDialog(entity_opt) => {
                  if self.dialog_opt.is_none() {
-@@ -2644,7 +3088,7 @@ impl Application for App {
+@@ -2644,7 +3102,7 @@ impl Application for App {
                                      .unwrap_or(String::new()),
                                  path.parent().map(|x| x.to_path_buf()),
                              ),
@@ -1501,7 +1584,7 @@ index 7181f68..fd5ea47 100644
                          };
                          let mut settings =
                              DialogSettings::new().kind(DialogKind::SaveFile { filename });
-@@ -2663,14 +3107,20 @@ impl Application for App {
+@@ -2663,14 +3121,20 @@ impl Application for App {
              Message::SaveAsResult(entity, result) => {
                  self.dialog_opt = None;
                  match result {
@@ -1524,7 +1607,7 @@ index 7181f68..fd5ea47 100644
                                  if let Some(path) = tab.path_opt.clone()
                                      && let Ok(canonical) = fs::canonicalize(&path)
                                  {
-@@ -2680,7 +3130,10 @@ impl Application for App {
+@@ -2680,7 +3144,10 @@ impl Application for App {
                              if let Some(title) = title_opt {
                                  self.tab_model.text_set(entity, title);
                              }
@@ -1536,7 +1619,7 @@ index 7181f68..fd5ea47 100644
                          }
                      }
                  }
-@@ -2688,6 +3141,7 @@ impl Application for App {
+@@ -2688,6 +3155,7 @@ impl Application for App {
              Message::SelectAll => {
                  if let Some(Tab::Editor(tab)) = self.active_tab_mut() {
                      let mut editor = tab.editor.lock().unwrap();
@@ -1544,7 +1627,7 @@ index 7181f68..fd5ea47 100644
  
                      // Set cursor to lowest possible value
                      editor.set_cursor(Cursor::new(0, 0));
-@@ -2701,16 +3155,7 @@ impl Application for App {
+@@ -2701,16 +3169,7 @@ impl Application for App {
                      editor.set_selection(selection);
                  }
              }
@@ -1562,7 +1645,7 @@ index 7181f68..fd5ea47 100644
              Message::Surface(a) => {
                  return cosmic::task::message(cosmic::Action::Surface(a));
              }
-@@ -2737,11 +3182,13 @@ impl Application for App {
+@@ -2737,11 +3196,13 @@ impl Application for App {
                  }
  
                  self.tab_model.activate(entity);
@@ -1578,7 +1661,7 @@ index 7181f68..fd5ea47 100644
                  // Indices 1 to 8 jumps to tabs 1-8 while 9 jumps to the last
                  let pos = if pos >= 8 || pos > len - 1 {
                      len - 1
-@@ -2749,13 +3196,20 @@ impl Application for App {
+@@ -2749,13 +3210,20 @@ impl Application for App {
                      pos % len
                  };
  
@@ -1601,7 +1684,7 @@ index 7181f68..fd5ea47 100644
                      let mut title = tab.title();
                      //TODO: better way of adding change indicator
                      if tab.changed() {
-@@ -2763,8 +3217,18 @@ impl Application for App {
+@@ -2763,8 +3231,18 @@ impl Application for App {
                      }
                      self.tab_model.text_set(entity, title);
                  }
@@ -1620,7 +1703,7 @@ index 7181f68..fd5ea47 100644
                  match self.tab_model.data_mut::<Tab>(entity) {
                      // Only match a changed editor tab...
                      Some(Tab::Editor(tab)) if tab.changed() => {
-@@ -2790,8 +3254,16 @@ impl Application for App {
+@@ -2790,8 +3268,16 @@ impl Application for App {
                  }
              }
              Message::TabCloseForce(entity) => {
@@ -1638,7 +1721,7 @@ index 7181f68..fd5ea47 100644
                      && let Some(position) = self.tab_model.position(entity)
                  {
                      if position > 0 {
-@@ -2805,8 +3277,9 @@ impl Application for App {
+@@ -2805,8 +3291,9 @@ impl Application for App {
                  self.tab_model.remove(entity);
                  self.update_watcher();
  
@@ -1650,7 +1733,7 @@ index 7181f68..fd5ea47 100644
                      return self.update(Message::QuitForce);
                  }
  
-@@ -2832,27 +3305,30 @@ impl Application for App {
+@@ -2832,27 +3319,30 @@ impl Application for App {
                  }
              }
              Message::TabNext => {
@@ -1694,7 +1777,7 @@ index 7181f68..fd5ea47 100644
                  if let Some(entity) = entity {
                      return self.update(Message::TabActivate(entity));
                  }
-@@ -2925,9 +3401,12 @@ impl Application for App {
+@@ -2925,9 +3415,12 @@ impl Application for App {
                  return self.update_config();
              }
              Message::Undo => {
@@ -1707,7 +1790,7 @@ index 7181f68..fd5ea47 100644
                          editor.undo();
                      }
  
-@@ -2981,12 +3460,25 @@ impl Application for App {
+@@ -2981,12 +3474,25 @@ impl Application for App {
              }
              Message::Focus(window_id) => {
                  if Some(window_id) == self.core.main_window_id() {
@@ -1735,7 +1818,7 @@ index 7181f68..fd5ea47 100644
          }
  
          Task::none()
-@@ -3013,6 +3505,7 @@ impl Application for App {
+@@ -3013,6 +3519,7 @@ impl Application for App {
                  Message::ToggleContextPage(ContextPage::GitManagement),
              )
              .title(fl!("git-management")),
@@ -1743,7 +1826,7 @@ index 7181f68..fd5ea47 100644
              ContextPage::ProjectSearch => context_drawer::context_drawer(
                  self.project_search(),
                  Message::ToggleContextPage(ContextPage::ProjectSearch),
-@@ -3032,6 +3525,11 @@ impl Application for App {
+@@ -3032,6 +3539,11 @@ impl Application for App {
              Some(Tab::GitDiff(_)) => false,
              None => false,
          };
@@ -1755,7 +1838,7 @@ index 7181f68..fd5ea47 100644
  
          vec![menu_bar(
              &self.core,
-@@ -3040,9 +3538,22 @@ impl Application for App {
+@@ -3040,9 +3552,22 @@ impl Application for App {
              &self.key_binds,
              &self.projects,
              has_selection,
@@ -1778,7 +1861,7 @@ index 7181f68..fd5ea47 100644
      fn view(&self) -> Element<'_, Message> {
          let cosmic_theme::Spacing {
              space_none,
-@@ -3052,269 +3563,12 @@ impl Application for App {
+@@ -3052,269 +3577,12 @@ impl Application for App {
  
          let mut tab_column = widget::column::with_capacity(3).padding([space_none, space_xxs]);
  
@@ -2053,7 +2136,7 @@ index 7181f68..fd5ea47 100644
  
          let content: Element<_> = tab_column.into();
  
-@@ -3324,6 +3578,9 @@ impl Application for App {
+@@ -3324,6 +3592,9 @@ impl Application for App {
      }
  
      fn view_window(&self, window_id: window::Id) -> Element<'_, Message> {
@@ -2063,7 +2146,7 @@ index 7181f68..fd5ea47 100644
          match &self.dialog_opt {
              Some(dialog) => dialog.view(window_id),
              None => widget::text("Unknown window ID").into(),
-@@ -3342,15 +3599,43 @@ impl Application for App {
+@@ -3342,15 +3613,43 @@ impl Application for App {
                      modifiers,
                      physical_key,
                      key,
@@ -2109,7 +2192,7 @@ index 7181f68..fd5ea47 100644
                  event::Event::Window(window::Event::CloseRequested) => {
                      Some(Message::CloseWindow(window_id))
                  }
-@@ -3466,28 +3751,18 @@ impl Application for App {
+@@ -3466,28 +3765,18 @@ impl Application for App {
              },
          ];
  

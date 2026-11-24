@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Fri, 20 Nov 2026 14:40:50 +0100
+Date: Wed, 25 Nov 2026 00:00:58 +0100
 Subject: [PATCH 07/10] Status bar and Go to line
 
 Cursor, selection and document counts, line ending, encoding and indentation in an optional status bar; Ctrl+G jumps to a line or line:column.
@@ -9,10 +9,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/src/app_status.rs b/src/app_status.rs
 new file mode 100644
-index 0000000..d62f2f5
+index 0000000..09ffd94
 --- /dev/null
 +++ b/src/app_status.rs
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,294 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! The status bar of the window: its row of widgets and when it counts the text again. The
@@ -103,6 +103,7 @@ index 0000000..d62f2f5
 +        });
 +        drop(editor);
 +        let indentation = status_bar::Indentation::from_tab_width(self.config.tab_width).text();
++        let zoom = self.status_zoom(tab, space_xxs);
 +
 +        let counts = match self.line_ending_note {
 +            Some((entity, ending, _)) if entity == self.tab_model.active() => {
@@ -123,13 +124,16 @@ index 0000000..d62f2f5
 +            _ => counts.text(),
 +        };
 +
-+        let row = widget::row::with_children(vec![
++        let mut items: Vec<Element<'_, Message>> = vec![
 +            button::custom(widget::text::caption(position))
 +                .on_press(goto_line::open())
 +                .padding([0, space_xxs])
 +                .class(style::Button::Text)
 +                .into(),
 +            widget::space::horizontal().into(),
++        ];
++        items.extend([
++            zoom,
 +            widget::text::caption(counts).into(),
 +            menu_ext::status_line_endings(
 +                self.core(),
@@ -147,10 +151,11 @@ index 0000000..d62f2f5
 +                space_xxs,
 +            ),
 +            language::status_item(self.core(), &self.key_binds, tab, space_xxs),
-+        ])
-+        .align_y(Alignment::Center)
-+        .padding([0, space_xxs])
-+        .spacing(space_s);
++        ]);
++        let row = widget::row::with_children(items)
++            .align_y(Alignment::Center)
++            .padding([0, space_xxs])
++            .spacing(space_s);
 +        Some(
 +            widget::layer_container(row)
 +                .layer(cosmic_theme::Layer::Primary)
@@ -159,20 +164,147 @@ index 0000000..d62f2f5
 +        )
 +    }
 +
++    /// The tab's zoom ("100%"): a click opens a popup to zoom out and in, reset, or pick a
++    /// preset level, as in browsers and Word. It stays open while zooming; a click elsewhere
++    /// or Escape closes it.
++    fn status_zoom<'a>(
++        &'a self,
++        tab: &'a crate::tab::EditorTab,
++        padding: u16,
++    ) -> Element<'a, Message> {
++        let factor = crate::markdown::zoom_factor(&self.config, tab.zoom_adj());
++        let item = button::custom(widget::text::caption(status_bar::zoom_label(factor)))
++            .on_press(Message::ZoomPopup(!self.zoom_popup))
++            .padding([0, padding])
++            .class(style::Button::Text);
++        let popover = widget::popover(item)
++            .position(widget::popover::Position::Top)
++            .on_close(Message::ZoomPopup(false));
++        if !self.zoom_popup {
++            return popover.into();
++        }
++        let cosmic_theme::Spacing {
++            space_xxs,
++            space_xs,
++            ..
++        } = self.core().system_theme().cosmic().spacing;
++        let keys = |action: Action, fallback: &str| {
++            self.key_binds
++                .iter()
++                .find(|(_, bound)| **bound == action)
++                .map_or_else(
++                    || fallback.to_string(),
++                    |(key_bind, _)| key_bind.to_string(),
++                )
++        };
++        let tip = |content: Element<'a, Message>, text: String| -> Element<'a, Message> {
++            widget::tooltip(
++                content,
++                widget::text::body(text),
++                widget::tooltip::Position::Top,
++            )
++            .into()
++        };
++        let step = |label: &'static str, message: Message| {
++            button::custom(
++                widget::container(widget::text::body(label)).center_x(Length::Fixed(20.0)),
++            )
++            .on_press(message)
++            .padding(space_xxs)
++            .class(style::Button::Standard)
++        };
++        let reset = button::text(fl!("zoom-reset"))
++            .on_press_maybe((tab.zoom_adj() != 0).then_some(Message::ZoomReset));
++        let row = widget::row::with_children(vec![
++            tip(
++                step("−", Message::ZoomOut).into(),
++                fl!("zoom-out-tooltip", keys = keys(Action::ZoomOut, "Ctrl+-")),
++            ),
++            widget::container(widget::text::body(status_bar::zoom_label(factor)))
++                .center_x(Length::Fixed(48.0))
++                .into(),
++            tip(
++                step("+", Message::ZoomIn).into(),
++                fl!("zoom-in-tooltip", keys = keys(Action::ZoomIn, "Ctrl+=")),
++            ),
++            tip(
++                reset.into(),
++                fl!(
++                    "zoom-reset-tooltip",
++                    keys = keys(Action::ZoomReset, "Ctrl+0")
++                ),
++            ),
++        ])
++        .align_y(Alignment::Center)
++        .spacing(space_xxs);
++        let font_size = f32::from(self.config.font_size).max(1.0);
++        let zoom_step = f32::from(self.config.font_size_zoom_step_mul_100) / 100.0;
++        let presets = status_bar::ZOOM_PRESETS.iter().map(|&preset| {
++            let zoom_adj = status_bar::preset_zoom_adj(font_size, zoom_step, preset);
++            let current = zoom_adj == tab.zoom_adj();
++            let mark: Element<'a, Message> = if current {
++                widget::icon::from_name("object-select-symbolic")
++                    .size(16)
++                    .into()
++            } else {
++                widget::Space::new().width(16).into()
++            };
++            button::custom(
++                widget::row::with_children(vec![
++                    mark,
++                    widget::text::body(fl!("status-zoom", percent = i64::from(preset))).into(),
++                ])
++                .spacing(space_xs)
++                .align_y(Alignment::Center),
++            )
++            .on_press(Message::ZoomTo(zoom_adj))
++            .padding([space_xxs, space_xs])
++            .width(Length::Fill)
++            .class(style::Button::MenuItem)
++            .into()
++        });
++        let popup = widget::container(
++            widget::column::with_children(
++                std::iter::once(row.into())
++                    .chain(std::iter::once(widget::divider::horizontal::light().into()))
++                    .chain(presets)
++                    .collect::<Vec<_>>(),
++            )
++            .spacing(space_xxs)
++            .width(Length::Fixed(200.0)),
++        )
++        .padding(space_xs)
++        .class(style::Container::Dropdown);
++        popover.popup(popup).into()
++    }
++
 +    /// Keys, clicks and input method text move the cursor without a message of the editor's
 +    /// own: one for the status bar to show where it went.
 +    pub(crate) fn status_bar_subscription(&self) -> Subscription<Message> {
 +        if !self.config.show_status_bar {
 +            return Subscription::none();
 +        }
-+        event::listen_with(|event, _status, _window| match event {
++        // Escape closes the zoom popup, also when the editor has taken the key
++        let zoom_popup = if self.zoom_popup {
++            event::listen_with(|event, _status, _window| match event {
++                event::Event::Keyboard(keyboard::Event::KeyPressed {
++                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
++                    ..
++                }) => Some(Message::ZoomPopup(false)),
++                _ => None,
++            })
++        } else {
++            Subscription::none()
++        };
++        let refresh = event::listen_with(|event, _status, _window| match event {
 +            event::Event::Keyboard(keyboard::Event::KeyPressed { .. })
 +            | event::Event::Mouse(mouse::Event::ButtonReleased(_))
 +            | event::Event::InputMethod(iced::advanced::input_method::Event::Commit(_)) => {
 +                Some(Message::StatusBarRefresh)
 +            }
 +            _ => None,
-+        })
++        });
++        Subscription::batch([refresh, zoom_popup])
 +    }
 +}
 diff --git a/src/goto_line.rs b/src/goto_line.rs
@@ -386,10 +518,10 @@ index 0000000..bdb9272
 +}
 diff --git a/src/status_bar.rs b/src/status_bar.rs
 new file mode 100644
-index 0000000..65c5064
+index 0000000..280965d
 --- /dev/null
 +++ b/src/status_bar.rs
-@@ -0,0 +1,855 @@
+@@ -0,0 +1,908 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! Data and text of the status bar: where the cursor is, what is selected, how long the text
@@ -717,6 +849,31 @@ index 0000000..65c5064
 +    pub fn clear(&mut self) {
 +        self.cached = None;
 +    }
++}
++
++/// The tab's zoom in whole percent of the default size: `factor` 1 is 100 %.
++pub fn zoom_percent(factor: f32) -> i64 {
++    (factor * 100.0).round() as i64
++}
++
++/// The tab's zoom as browsers show it, e.g. "125%".
++pub fn zoom_label(factor: f32) -> String {
++    fl!("status-zoom", percent = zoom_percent(factor))
++}
++
++/// The zoom levels the status bar's zoom popup offers, as in Word.
++pub const ZOOM_PRESETS: [u16; 8] = [50, 75, 100, 125, 150, 200, 300, 400];
++
++/// The zoom adjustment (font size steps of `step` px from `font_size`) closest to `percent`
++/// of the default size.
++pub fn preset_zoom_adj(font_size: f32, step: f32, percent: u16) -> i8 {
++    if step <= 0.0 {
++        return 0;
++    }
++    let target = font_size * f32::from(percent) / 100.0;
++    ((target - font_size) / step)
++        .round()
++        .clamp(f32::from(i8::MIN), f32::from(i8::MAX)) as i8
 +}
 +
 +/// `LF`, `CRLF`, `CR` or `Mixed`. A text without any line break shows the ending a new line
@@ -1127,6 +1284,31 @@ index 0000000..65c5064
 +    }
 +
 +    #[test]
++    fn zoom_label_in_whole_percent() {
++        assert_eq!(plain(zoom_label(1.0)), "100%");
++        assert_eq!(plain(zoom_label(1.002)), "100%");
++        assert_eq!(plain(zoom_label(16.0 / 14.0)), "114%");
++        assert_eq!(plain(zoom_label(0.5)), "50%");
++        assert_eq!(plain(zoom_label(2.0)), "200%");
++    }
++
++    #[test]
++    fn presets_map_to_the_closest_zoom_step() {
++        // The default 14 px font in 1 px steps
++        assert_eq!(preset_zoom_adj(14.0, 1.0, 100), 0);
++        assert_eq!(preset_zoom_adj(14.0, 1.0, 50), -7);
++        assert_eq!(preset_zoom_adj(14.0, 1.0, 200), 14);
++        assert_eq!(preset_zoom_adj(14.0, 1.0, 400), 42);
++        // 75 % of 14 px is 10.5 px: the closer step, rounded
++        assert_eq!(preset_zoom_adj(14.0, 1.0, 75), -4);
++        // Larger steps take fewer of them
++        assert_eq!(preset_zoom_adj(14.0, 2.0, 200), 7);
++        // Out of the adjustment's range: as far as it goes
++        assert_eq!(preset_zoom_adj(100.0, 0.25, 400), i8::MAX);
++        assert_eq!(preset_zoom_adj(14.0, 0.0, 200), 0);
++    }
++
++    #[test]
 +    fn line_ending_labels() {
 +        let line = |text: &str, ending| {
 +            BufferLine::new(
@@ -1229,7 +1411,10 @@ index 0000000..65c5064
 +        // No line break: LF, what new lines get; CRLF has nothing to convert
 +        let (header, choices) = line_ending_choices(EndingCounts::default());
 +        assert!(header.is_some());
-+        assert_eq!(choices, [choice(lf, true, true), choice(crlf, false, false)]);
++        assert_eq!(
++            choices,
++            [choice(lf, true, true), choice(crlf, false, false)]
++        );
 +    }
 +
 +    #[test]
