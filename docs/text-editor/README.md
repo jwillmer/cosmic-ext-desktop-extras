@@ -8,8 +8,8 @@ changes asks before anything is lost. Markdown is quick to write: a "/" menu of 
 for text styles, links and headings, and list and table editing. On top: Mermaid diagrams, an
 outline of Markdown headings, JSON tools, visible whitespace and line endings, find and replace
 with count, extended mode and regex groups, a language per tab, a status bar, Go to line, column selection, code
-folding, closing many tabs at once, two views side by side, and large
-files that open fast.
+folding, closing many tabs at once, two views side by side, preview zoom that scales images
+too, large files that open fast and a quick start with many restored tabs.
 The renderer is libcosmic's native Markdown widget (pulldown-cmark), not a web engine, so the
 editor starts as fast as before. User overview: [text-editor/README.md](../../text-editor/README.md).
 

@@ -12,7 +12,7 @@ patches, one per change, is in git history up to
 
 | Patch | What |
 |---|---|
-| `0001-Markdown-preview-…` | `markdown*.rs`, `selectable_rich.rs`: views, parsing, HTML blocks, images, Mermaid, code colours, outline, scroll map, preview selection and its scrolling, bare web addresses as links |
+| `0001-Markdown-preview-…` | `markdown*.rs`, `selectable_rich.rs`: views, parsing, HTML blocks, images, Mermaid, code colours, outline, scroll map, preview selection and its scrolling, bare web addresses as links, zoomed images (`markdown_zoom.rs`) |
 | `0002-Markdown-editing-…` | `md_*.rs`, `slash_menu.rs`, `slash_popup.rs`: "/" menu, Bold and Italic, list, link and code helpers, tables, shortcuts panel |
 | `0003-Session-restore-…` | `session.rs`, `single_instance.rs`, `disk_change.rs`: session and drafts, one window, files changed on disk |
 | `0004-Change-history-and-compare` | `change_history.rs`, `compare.rs`: change marks and tint, Compare with saved, with another tab and the two views |

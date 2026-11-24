@@ -11,14 +11,15 @@ COSMIC's own editor.**
 - **Write Markdown fast:** a "/" menu of blocks, shortcuts for bold, links and headings, and lists,
   tasks and tables that format themselves as you type.
 - **See it rendered live:** Preview, Source or Split, with tables, alerts, Mermaid diagrams,
-  coloured code and an outline of the headings.
+  coloured code and an outline of the headings. Zoom with Ctrl+wheel and images grow with the text.
 - **Never lose a tab:** files open as tabs in one window, and the tabs of your last session come
-  back with their unsaved changes. Changed lines stay marked until you save.
+  back with their unsaved changes. Changed lines stay marked until you save. The window is up in
+  under a second, also with two dozen tabs.
 - **Fast, also with big files:** no built-in browser, so the editor opens instantly, and large files
   and long notes stay quick.
 - **The comforts of Notepad++:** JSON formatting, visible whitespace, column selection, code
   folding, Go to line (Ctrl+G), a Find and Replace window with extended mode, regex groups, Find
-  All and Find in Files, a language per tab, a status bar, closing all tabs at once and two views
+  All and Find in Files, a language per tab, a status bar with the zoom level, closing all tabs at once and two views
   side by side.
 
 Everything else is the normal COSMIC Text Editor, built from System76's source at the version the
@@ -122,6 +123,8 @@ maximized if it was; where it sits on screen is up to COSMIC (Wayland apps canno
 - Drafts are saved a few seconds after you stop typing, at least every 15 seconds while you type,
   and when you quit. A crash loses only the last seconds.
 - If a draft cannot be written (disk full), closing the window asks to save as before.
+- Many tabs do not slow the start: the window appears in about 0.7 s with 8 or 24 tabs, and a
+  Markdown tab you have not looked at yet draws its preview when you first open it.
 
 ## Changes
 
