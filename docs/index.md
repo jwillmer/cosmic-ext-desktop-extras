@@ -83,9 +83,10 @@ Typora, inside COSMIC's own editor.</p>
 - **Write Markdown fast.** Type `/` for a menu of blocks. Ctrl+B, Ctrl+K and Ctrl+Shift+1…6 make
   bold, links and headings; lists continue, tasks tick and tables align themselves as you type.
 - **See it rendered live.** Preview, Source or Split (Ctrl+Alt+1 / 2 / 3), with tables, alerts,
-  Mermaid diagrams, coloured code and an outline of the headings.
+  Mermaid diagrams, coloured code and an outline of the headings. Zoom with Ctrl+wheel and images
+  grow with the text.
 - **Never lose a tab.** Files open as tabs in one window, and every tab of your last session comes
-  back, unsaved drafts included.
+  back, unsaved drafts included. The window is up in under a second, also with two dozen tabs.
 - **Fast, also with big files.** No built-in browser: the editor opens instantly, and large files
   and long notes stay quick.
 - **The comforts of Notepad++.** Two views side by side, compare, column selection, folding and
@@ -100,7 +101,7 @@ Typora, inside COSMIC's own editor.</p>
 | | Works the same | Not there |
 |---|---|---|
 | Writing | The `/` menu, Markdown shortcuts, lists and tables that format themselves | Spell check, pasting images, typing in the rendered page (typing in Preview switches to Source) |
-| Reading | Live Split preview, heading outline, Mermaid, alerts, coloured code | Export to PDF or HTML |
+| Reading | Live Split preview, heading outline, Mermaid, alerts, coloured code, zoom that scales images too | Export to PDF or HTML |
 | Your notes | Plain `.md` files in a folder, opened as a project and searchable | Wiki-links (`[[…]]`), backlinks, graph view, plugins |
 
 **Never lose an edit.** Changed lines and words stay marked until you save. When another program

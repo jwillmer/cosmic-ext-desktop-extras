@@ -89,14 +89,14 @@ COSMIC's own editor.**
 - **Write Markdown fast.** Type `/` for a menu of blocks. Ctrl+B, Ctrl+K and Ctrl+Shift+1…6 make
   bold, links and headings; lists continue, tasks tick and tables align themselves as you type.
 - **See it rendered live.** Preview, Source or Split, with tables, alerts, Mermaid diagrams,
-  coloured code and an outline of the headings.
+  coloured code and an outline of the headings. Zoom with Ctrl+wheel and images grow with the text.
 - **Never lose a tab.** Every tab from last time comes back, unsaved drafts included, and changed
-  lines stay marked until you save.
+  lines stay marked until you save. The window is up in under a second, also with two dozen tabs.
 - **Fast, also with big files.** No built-in browser: the editor opens instantly, and large files
   and long notes stay quick.
 - **The comforts of Notepad++.** One window with tabs, two views side by side, compare, column
   selection, folding, Go to line, a Find and Replace window with Find All and Find in Files, a
-  language per tab, a status bar and JSON tools.
+  language per tab, a status bar with the zoom level and JSON tools.
 
 [![A Markdown note with a nested list, tasks, a link and an aligned table, next to the Markdown shortcuts](docs/media/text-editor-markdown.svg)](text-editor/README.md)
 

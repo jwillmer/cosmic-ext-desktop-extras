@@ -36,6 +36,9 @@ place its own window.
   is deleted in that run.
 - Settings, "Restore previous session" (on by default). Off: the editor behaves as upstream and
   the stored session is deleted.
+- A start with many tabs stays quick (about 0.7 s to the window with 8 or 24 tabs): the system
+  theme is read once, the file watcher and recent files are updated once at the end, and a
+  restored Markdown tab that is not on screen builds its preview when it is first shown.
 - Only one editor process owns the session; one started with `COSMIC_SINGLE_INSTANCE=false` leaves
   it alone.
 
