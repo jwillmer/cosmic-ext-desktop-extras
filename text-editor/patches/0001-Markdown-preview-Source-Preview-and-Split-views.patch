@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Tue, 24 Nov 2026 23:24:34 +0100
+Date: Wed, 25 Nov 2026 00:00:58 +0100
 Subject: [PATCH 01/10] Markdown preview: Source, Preview and Split views
 
 Rendered preview with inline images, HTML blocks, alerts, Mermaid diagrams, code colours, an outline, a scroll map that keeps editor and preview in step, and text that the mouse can select and copy, with tables and code blocks that scroll along with a selection, and clickable bare web addresses.
@@ -9,10 +9,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/src/markdown.rs b/src/markdown.rs
 new file mode 100644
-index 0000000..f15f0f2
+index 0000000..373ab65
 --- /dev/null
 +++ b/src/markdown.rs
-@@ -0,0 +1,4977 @@
+@@ -0,0 +1,4974 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! Markdown preview: Source, Preview and Split views for Markdown tabs.
@@ -2849,12 +2849,9 @@ index 0000000..f15f0f2
 +            move |edge| Message::DragEdge(entity, edge).into(),
 +        );
 +        // Ctrl+wheel zooms, as Ctrl+Plus and Ctrl+Minus do
-+        let scrollable = zoom::CtrlWheel::new(scrollable, |steps| {
-+            if steps > 0 {
-+                AppMessage::ZoomIn
-+            } else {
-+                AppMessage::ZoomOut
-+            }
++        // The tab under the pointer, also in the view that is not active
++        let scrollable = zoom::CtrlWheel::new(scrollable, move |steps| {
++            AppMessage::ZoomTab(entity, steps.clamp(-127, 127) as i8)
 +        });
 +        // Keyed by tab: otherwise the next tab inherits this scroll position
 +        iced::widget::keyed_column([(entity, scrollable.into())])
@@ -9318,10 +9315,10 @@ index 0000000..ce66a6c
 +}
 diff --git a/src/markdown_zoom.rs b/src/markdown_zoom.rs
 new file mode 100644
-index 0000000..ed35e65
+index 0000000..41a7478
 --- /dev/null
 +++ b/src/markdown_zoom.rs
-@@ -0,0 +1,601 @@
+@@ -0,0 +1,665 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! Zoom for the pictures of the Markdown preview: Ctrl+Plus and Ctrl+Minus scale images and
@@ -9658,8 +9655,8 @@ index 0000000..ed35e65
 +    state.update(delta).y
 +}
 +
-+/// Ctrl+wheel over `content` (the preview) zooms, as in Notepad++: `on_zoom` gets +1 for a step
-+/// in and -1 for a step out. With Ctrl held the wheel never also scrolls the page or a picture's
++/// Ctrl+wheel over `content` (the preview) zooms, as in Notepad++: `on_zoom` gets the steps of
++/// one wheel event, positive in and negative out, at most [`MAX_WHEEL_STEPS`] either way. With Ctrl held the wheel never also scrolls the page or a picture's
 +/// scroll strip.
 +pub struct CtrlWheel<'a, Message> {
 +    content: Element<'a, Message>,
@@ -9678,10 +9675,40 @@ index 0000000..ed35e65
 +    }
 +}
 +
++/// Most zoom steps one wheel event makes: a fast flick on a touchpad does not jump to the end.
++const MAX_WHEEL_STEPS: isize = 4;
++
 +#[derive(Default)]
 +struct WheelState {
 +    ctrl: bool,
 +    scroll: DiscreteScrollState,
++}
++
++impl WheelState {
++    /// Follows Ctrl and turns a wheel event over the preview (`over`) with Ctrl held into zoom
++    /// steps: `None` when the event is not ours and goes on to the content, `Some(steps)` (0
++    /// while touchpad pixels add up) when it is taken.
++    fn event(&mut self, event: &Event, over: bool) -> Option<isize> {
++        match event {
++            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
++                self.ctrl = modifiers.control();
++                if !self.ctrl {
++                    self.scroll.reset();
++                }
++                None
++            }
++            // Ctrl let go in another window never arrives here: forget it
++            Event::Window(cosmic::iced::window::Event::Unfocused) => {
++                self.ctrl = false;
++                self.scroll.reset();
++                None
++            }
++            Event::Mouse(mouse::Event::WheelScrolled { delta }) if self.ctrl && over => {
++                Some(wheel_steps(&mut self.scroll, *delta).clamp(-MAX_WHEEL_STEPS, MAX_WHEEL_STEPS))
++            }
++            _ => None,
++        }
++    }
 +}
 +
 +impl<Message> Widget<Message, Theme, Renderer> for CtrlWheel<'_, Message> {
@@ -9765,25 +9792,13 @@ index 0000000..ed35e65
 +        viewport: &Rectangle,
 +    ) {
 +        let state = tree.state.downcast_mut::<WheelState>();
-+        match event {
-+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
-+                state.ctrl = modifiers.control();
-+                if !state.ctrl {
-+                    state.scroll.reset();
-+                }
++        // Before the content sees it: the page and the scroll strips stay where they are
++        if let Some(steps) = state.event(event, cursor.is_over(layout.bounds())) {
++            if steps != 0 {
++                shell.publish((self.on_zoom)(steps));
 +            }
-+            // Before the content sees it: the page and the scroll strips stay where they are
-+            Event::Mouse(mouse::Event::WheelScrolled { delta })
-+                if state.ctrl && cursor.is_over(layout.bounds()) =>
-+            {
-+                let steps = wheel_steps(&mut state.scroll, *delta);
-+                for _ in 0..steps.unsigned_abs() {
-+                    shell.publish((self.on_zoom)(steps.signum()));
-+                }
-+                shell.capture_event();
-+                return;
-+            }
-+            _ => {}
++            shell.capture_event();
++            return;
 +        }
 +        self.content.as_widget_mut().update(
 +            &mut tree.children[0],
@@ -9849,7 +9864,53 @@ index 0000000..ed35e65
 +    // - a picture without a size takes no space
 +    // - an HTML size with one side given keeps the aspect ratio for the other
 +    // - Ctrl+wheel: a notch up is a step in, down a step out; touchpad pixels add up to a step
++    // - the wheel zooms only with Ctrl held and over the preview; Ctrl is forgotten when the
++    //   window loses focus, so a plain wheel scrolls again
++    // - one wheel event makes at most MAX_WHEEL_STEPS steps
 +    use super::*;
++
++    fn ctrl(held: bool) -> Event {
++        let modifiers = if held {
++            keyboard::Modifiers::CTRL
++        } else {
++            keyboard::Modifiers::empty()
++        };
++        Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers))
++    }
++
++    fn wheel(y: f32) -> Event {
++        Event::Mouse(mouse::Event::WheelScrolled {
++            delta: mouse::ScrollDelta::Lines { x: 0.0, y },
++        })
++    }
++
++    #[test]
++    fn wheel_zooms_only_with_ctrl_over_the_preview() {
++        let mut state = WheelState::default();
++        assert_eq!(state.event(&wheel(1.0), true), None);
++        assert_eq!(state.event(&ctrl(true), true), None);
++        assert_eq!(state.event(&wheel(1.0), true), Some(1));
++        assert_eq!(state.event(&wheel(-1.0), true), Some(-1));
++        assert_eq!(state.event(&wheel(1.0), false), None);
++        state.event(&ctrl(false), true);
++        assert_eq!(state.event(&wheel(1.0), true), None);
++    }
++
++    #[test]
++    fn unfocus_forgets_ctrl() {
++        let mut state = WheelState::default();
++        state.event(&ctrl(true), true);
++        state.event(&Event::Window(cosmic::iced::window::Event::Unfocused), true);
++        assert_eq!(state.event(&wheel(1.0), true), None);
++    }
++
++    #[test]
++    fn one_wheel_event_makes_a_few_steps_at_most() {
++        let mut state = WheelState::default();
++        state.event(&ctrl(true), true);
++        assert_eq!(state.event(&wheel(40.0), true), Some(MAX_WHEEL_STEPS));
++        assert_eq!(state.event(&wheel(-40.0), true), Some(-MAX_WHEEL_STEPS));
++    }
 +
 +    #[test]
 +    fn wheel_notches_and_touchpad_pixels_make_zoom_steps() {

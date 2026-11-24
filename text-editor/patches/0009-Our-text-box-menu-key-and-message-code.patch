@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Tue, 24 Nov 2026 23:24:34 +0100
+Date: Wed, 25 Nov 2026 00:00:58 +0100
 Subject: [PATCH 09/10] Our text box, menu, key and message code
 
 The text box drawing and keys, underlined links that open on double-click, scrolling along with a mouse selection, our menus, key bindings and update arms, kept in our own files next to the upstream ones they extend.
@@ -9,10 +9,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/src/app_update.rs b/src/app_update.rs
 new file mode 100644
-index 0000000..f411b1c
+index 0000000..9864fbf
 --- /dev/null
 +++ b/src/app_update.rs
-@@ -0,0 +1,429 @@
+@@ -0,0 +1,435 @@
 +//! Our messages in [`App::update`]: the arms for the messages upstream does not have, so
 +//! upstream's `update` keeps one hook arm and its own arms.
 +
@@ -45,6 +45,12 @@ index 0000000..f411b1c
 +        }
 +        match message {
 +            Message::ZoomPopup(open) => self.zoom_popup = open,
++            Message::ZoomTab(entity, steps) => {
++                if let Some(Tab::Editor(tab)) = self.tab_model.data_mut::<Tab>(entity) {
++                    tab.set_zoom_adj(tab.zoom_adj().saturating_add(steps));
++                    tab.set_config(&self.config);
++                }
++            }
 +            Message::ZoomTo(zoom_adj) => {
 +                let entity = self.tab_model.active();
 +                if let Some(Tab::Editor(tab)) = self.tab_model.data_mut::<Tab>(entity) {

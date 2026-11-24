@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Tue, 24 Nov 2026 23:24:34 +0100
+Date: Wed, 25 Nov 2026 00:00:58 +0100
 Subject: [PATCH 07/10] Status bar and Go to line
 
 Cursor, selection and document counts, line ending, encoding and indentation in an optional status bar; Ctrl+G jumps to a line or line:column.
@@ -518,7 +518,7 @@ index 0000000..bdb9272
 +}
 diff --git a/src/status_bar.rs b/src/status_bar.rs
 new file mode 100644
-index 0000000..6cfdee8
+index 0000000..280965d
 --- /dev/null
 +++ b/src/status_bar.rs
 @@ -0,0 +1,908 @@
@@ -851,8 +851,6 @@ index 0000000..6cfdee8
 +    }
 +}
 +
-+/// `LF`, `CRLF`, `CR` or `Mixed`. A text without any line break shows the ending a new line
-+/// would get (LF), not a dash.
 +/// The tab's zoom in whole percent of the default size: `factor` 1 is 100 %.
 +pub fn zoom_percent(factor: f32) -> i64 {
 +    (factor * 100.0).round() as i64
@@ -878,6 +876,8 @@ index 0000000..6cfdee8
 +        .clamp(f32::from(i8::MIN), f32::from(i8::MAX)) as i8
 +}
 +
++/// `LF`, `CRLF`, `CR` or `Mixed`. A text without any line break shows the ending a new line
++/// would get (LF), not a dash.
 +pub fn line_ending_label(endings: FileEndings) -> &'static str {
 +    match endings {
 +        FileEndings::None => ending_label(LineEnding::default()),
