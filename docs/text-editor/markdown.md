@@ -83,12 +83,13 @@ default, click to open); other tags are stripped and their text kept, comments h
 and GitHub alerts (`> [!NOTE]`, TIP, IMPORTANT, WARNING, CAUTION) render. Front matter is hidden.
 Colours follow the COSMIC theme; links use the accent colour.
 
-**Zoom:** Ctrl+Plus and Ctrl+Minus scale the preview's text and, by the same factor (the zoomed
-font size over the default one), its images, Mermaid diagrams and the 860 px page column. A picture
-is as wide as at the default zoom times the factor, so zooming in can make it wider than its own
-size and the window; then it sits in its own sideways scroll strip and the rest of the page keeps
-wrapping to the window (the mouse wheel still scrolls the page over it). `<img>` with a width or
-height scales by the factor too. At the default zoom nothing changes.
+**Zoom:** Ctrl+Plus, Ctrl+Minus and Ctrl+wheel (touchpad scrolling adds up to whole steps) scale
+the preview's text and, by the same factor (the zoomed font size over the default one), its images,
+Mermaid diagrams and the 860 px page column. A picture is as wide as at the default zoom times the
+factor, so zooming in can make it wider than its own size and the window; then it sits in its own
+sideways scroll strip and the rest of the page keeps wrapping to the window (the mouse wheel still
+scrolls the page over it). `<img>` with a width or height scales by the factor too. At the default
+zoom nothing changes.
 
 Code blocks with a language tag (`json`, `bash`, `python`, `rust`, ...) get syntax colours from the
 editor's own syntax set and syntax theme, so they look as in Source and follow the light/dark
