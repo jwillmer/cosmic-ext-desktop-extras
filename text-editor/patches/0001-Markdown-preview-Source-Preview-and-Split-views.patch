@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Tue, 24 Nov 2026 22:45:47 +0100
+Date: Tue, 24 Nov 2026 22:51:30 +0100
 Subject: [PATCH 01/10] Markdown preview: Source, Preview and Split views
 
 Rendered preview with inline images, HTML blocks, alerts, Mermaid diagrams, code colours, an outline, a scroll map that keeps editor and preview in step, and text that the mouse can select and copy, with tables and code blocks that scroll along with a selection, and clickable bare web addresses.
@@ -9,7 +9,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/src/markdown.rs b/src/markdown.rs
 new file mode 100644
-index 0000000..316541b
+index 0000000..6c608f2
 --- /dev/null
 +++ b/src/markdown.rs
 @@ -0,0 +1,4940 @@
@@ -3305,8 +3305,6 @@ index 0000000..316541b
 +        drawn
 +    }
 +
-+    /// A code block's or table's sideways `scrollable`, scrolling with a selection dragged
-+    /// from inside it to its sides.
 +    /// A picture at the tab's zoom. Zoomed in it may be wider than the column: then it scrolls
 +    /// sideways on its own, and the rest of the page stays as it is.
 +    fn zoomed(&self, picture: zoom::Picture) -> Element<'a, AppMessage> {
@@ -3325,6 +3323,8 @@ index 0000000..316541b
 +            .into()
 +    }
 +
++    /// A code block's or table's sideways `scrollable`, scrolling with a selection dragged
++    /// from inside it to its sides.
 +    fn side_scroll(
 +        &self,
 +        scrollable: impl Into<Element<'a, AppMessage>>,
@@ -5191,10 +5191,10 @@ index 0000000..551a1e1
 +}
 diff --git a/src/markdown_html.rs b/src/markdown_html.rs
 new file mode 100644
-index 0000000..09c4f45
+index 0000000..7fb508b
 --- /dev/null
 +++ b/src/markdown_html.rs
-@@ -0,0 +1,2454 @@
+@@ -0,0 +1,2458 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! What the iced Markdown widget leaves out of the preview, for GitHub style READMEs: images inside
@@ -6924,13 +6924,8 @@ index 0000000..09c4f45
 +        picture: &'a Picture,
 +        settings: Settings,
 +    ) -> Element<'a, AppMessage> {
-+        // The size the HTML asks for grows with the zoom, as the text does
-+        let width = picture
-+            .width
-+            .map_or(Length::Shrink, |width| Length::Fixed(width * self.zoom));
-+        let height = picture
-+            .height
-+            .map_or(Length::Shrink, |height| Length::Fixed(height * self.zoom));
++        let width = picture.width.map_or(Length::Shrink, Length::Fixed);
++        let height = picture.height.map_or(Length::Shrink, Length::Fixed);
 +        let fit = if picture.width.is_some() || picture.height.is_some() {
 +            ContentFit::Contain
 +        } else {
@@ -6938,21 +6933,30 @@ index 0000000..09c4f45
 +        };
 +        match self.images.get(&picture.url) {
 +            // Without a size: as wide as at the default zoom times the zoom
-+            Some(Some(image)) if fit == ContentFit::ScaleDown && self.zoom != 1.0 => {
-+                self.zoomed(image.picture())
++            Some(Some(image)) if self.zoom != 1.0 => {
++                if fit == ContentFit::ScaleDown {
++                    self.zoomed(image.picture())
++                } else {
++                    // The size the HTML asks for grows with the zoom, as the text does
++                    self.zoom_strip(super::zoom::Zoomed::sized(
++                        image.picture(),
++                        self.column.clone(),
++                        self.zoom,
++                        picture.width,
++                        picture.height,
++                    ))
++                }
 +            }
-+            Some(Some(Image::Raster(handle))) => self.zoom_strip(
-+                widget::image(handle.clone())
-+                    .width(width)
-+                    .height(height)
-+                    .content_fit(fit),
-+            ),
-+            Some(Some(Image::Vector(handle))) => self.zoom_strip(
-+                widget::svg(handle.clone())
-+                    .width(width)
-+                    .height(height)
-+                    .content_fit(fit),
-+            ),
++            Some(Some(Image::Raster(handle))) => widget::image(handle.clone())
++                .width(width)
++                .height(height)
++                .content_fit(fit)
++                .into(),
++            Some(Some(Image::Vector(handle))) => widget::svg(handle.clone())
++                .width(width)
++                .height(height)
++                .content_fit(fit)
++                .into(),
 +            _ => {
 +                let alt = if picture.alt.is_empty() {
 +                    picture.url.rsplit('/').next().unwrap_or_default()
@@ -9277,10 +9281,10 @@ index 0000000..ce66a6c
 +}
 diff --git a/src/markdown_zoom.rs b/src/markdown_zoom.rs
 new file mode 100644
-index 0000000..f9f3077
+index 0000000..a285122
 --- /dev/null
 +++ b/src/markdown_zoom.rs
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,384 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! Zoom for the pictures of the Markdown preview: Ctrl+Plus and Ctrl+Minus scale images and
@@ -9313,6 +9317,18 @@ index 0000000..f9f3077
 +    }
 +    let width = (natural.width.min(column.max(0.0)) * zoom).min(available);
 +    Size::new(width, natural.height * width / natural.width)
++}
++
++/// The size at the default zoom of a picture of `natural` size that HTML gives a `width`, a
++/// `height` or both: a missing side follows the picture's aspect ratio.
++pub fn html_size(natural: Size, width: Option<f32>, height: Option<f32>) -> Size {
++    let ratio = |a: f32, b: f32| if b > 0.0 { a / b } else { 0.0 };
++    match (width, height) {
++        (Some(width), Some(height)) => Size::new(width, height),
++        (Some(width), None) => Size::new(width, width * ratio(natural.height, natural.width)),
++        (None, Some(height)) => Size::new(height * ratio(natural.width, natural.height), height),
++        (None, None) => natural,
++    }
 +}
 +
 +/// Lays out `content` (the page column) and records the width the page column has at the
@@ -9466,21 +9482,49 @@ index 0000000..f9f3077
 +    content: Element<'a, Message>,
 +    column: Column,
 +    zoom: f32,
++    /// The width and height HTML gives the picture, if any.
++    html: Option<(Option<f32>, Option<f32>)>,
 +}
 +
 +impl<'a, Message: 'a> Zoomed<'a, Message> {
 +    pub fn new(picture: Picture, column: Column, zoom: f32) -> Self {
-+        // Fills the size the layout gives it
++        Self::with_html_size(picture, column, zoom, None)
++    }
++
++    /// A picture HTML gives a `width`, a `height` or both: that size (a missing side following
++    /// the aspect ratio) times `zoom`, fitted into it as at the default zoom.
++    pub fn sized(
++        picture: Picture,
++        column: Column,
++        zoom: f32,
++        width: Option<f32>,
++        height: Option<f32>,
++    ) -> Self {
++        Self::with_html_size(picture, column, zoom, Some((width, height)))
++    }
++
++    fn with_html_size(
++        picture: Picture,
++        column: Column,
++        zoom: f32,
++        html: Option<(Option<f32>, Option<f32>)>,
++    ) -> Self {
++        // Fills the size the layout gives it; an HTML size may not keep the aspect ratio
++        let fit = if html.is_some() {
++            cosmic::iced::ContentFit::Contain
++        } else {
++            cosmic::iced::ContentFit::Fill
++        };
 +        let content = match &picture {
 +            Picture::Raster(handle) => image(handle.clone())
 +                .width(Length::Fill)
 +                .height(Length::Fill)
-+                .content_fit(cosmic::iced::ContentFit::Fill)
++                .content_fit(fit)
 +                .into(),
 +            Picture::Vector(handle) => svg(handle.clone())
 +                .width(Length::Fill)
 +                .height(Length::Fill)
-+                .content_fit(cosmic::iced::ContentFit::Fill)
++                .content_fit(fit)
 +                .into(),
 +        };
 +        Self {
@@ -9488,6 +9532,7 @@ index 0000000..f9f3077
 +            content,
 +            column,
 +            zoom,
++            html,
 +        }
 +    }
 +}
@@ -9524,7 +9569,18 @@ index 0000000..f9f3077
 +            Picture::Vector(handle) => renderer.measure_svg(handle),
 +        };
 +        let natural = Size::new(natural.width as f32, natural.height as f32);
-+        let size = zoomed_size(natural, self.column.get(), self.zoom, limits.max().width);
++        let size = match self.html {
++            Some((width, height)) => {
++                let size = html_size(natural, width, height) * self.zoom;
++                let available = limits.max().width;
++                if size.width > available && size.width > 0.0 {
++                    size * (available / size.width)
++                } else {
++                    size
++                }
++            }
++            None => zoomed_size(natural, self.column.get(), self.zoom, limits.max().width),
++        };
 +        let node = self.content.as_widget_mut().layout(
 +            tree,
 +            renderer,
@@ -9566,7 +9622,17 @@ index 0000000..f9f3077
 +    // - zoomed out, it shrinks by the factor too
 +    // - it never gets wider than the space it has (infinite in a scroll strip)
 +    // - a picture without a size takes no space
++    // - an HTML size with one side given keeps the aspect ratio for the other
 +    use super::*;
++
++    #[test]
++    fn html_size_fills_the_missing_side() {
++        let natural = Size::new(400.0, 200.0);
++        assert_eq!(html_size(natural, Some(300.0), None), Size::new(300.0, 150.0));
++        assert_eq!(html_size(natural, None, Some(50.0)), Size::new(100.0, 50.0));
++        assert_eq!(html_size(natural, Some(30.0), Some(90.0)), Size::new(30.0, 90.0));
++        assert_eq!(html_size(Size::ZERO, Some(30.0), None), Size::new(30.0, 0.0));
++    }
 +
 +    #[test]
 +    fn default_zoom_keeps_size_or_shrinks_to_column() {
