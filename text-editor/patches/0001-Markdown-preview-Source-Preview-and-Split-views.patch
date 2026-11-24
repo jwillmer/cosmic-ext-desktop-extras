@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
-Date: Fri, 20 Nov 2026 14:40:50 +0100
+Date: Tue, 24 Nov 2026 22:45:47 +0100
 Subject: [PATCH 01/10] Markdown preview: Source, Preview and Split views
 
 Rendered preview with inline images, HTML blocks, alerts, Mermaid diagrams, code colours, an outline, a scroll map that keeps editor and preview in step, and text that the mouse can select and copy, with tables and code blocks that scroll along with a selection, and clickable bare web addresses.
@@ -9,10 +9,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 diff --git a/src/markdown.rs b/src/markdown.rs
 new file mode 100644
-index 0000000..fb46cbf
+index 0000000..316541b
 --- /dev/null
 +++ b/src/markdown.rs
-@@ -0,0 +1,4866 @@
+@@ -0,0 +1,4940 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! Markdown preview: Source, Preview and Split views for Markdown tabs.
@@ -73,6 +73,8 @@ index 0000000..fb46cbf
 +mod mermaid;
 +#[path = "markdown_remote.rs"]
 +pub mod remote;
++#[path = "markdown_zoom.rs"]
++mod zoom;
 +
 +const EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkd", "mkdn"];
 +/// The preview's parser options without front matter, for callers that find it themselves.
@@ -376,6 +378,15 @@ index 0000000..fb46cbf
 +enum Image {
 +    Raster(widget::image::Handle),
 +    Vector(widget::svg::Handle),
++}
++
++impl Image {
++    fn picture(&self) -> zoom::Picture {
++        match self {
++            Image::Raster(handle) => zoom::Picture::Raster(handle.clone()),
++            Image::Vector(handle) => zoom::Picture::Vector(handle.clone()),
++        }
++    }
 +}
 +
 +/// Per tab state of a Markdown file.
@@ -847,6 +858,9 @@ index 0000000..fb46cbf
 +                record: true,
 +                ..LeafLog::default()
 +            }),
++            // Pictures have no text to copy
++            zoom: 1.0,
++            column: zoom::Column::default(),
 +        };
 +        drop(html::view_document(
 +            &self.document,
@@ -2255,7 +2269,8 @@ index 0000000..fb46cbf
 +                let mut mode = None;
 +                if let Some(Tab::Editor(tab)) = self.tab_model.data_mut::<Tab>(entity) {
 +                    let text_size = text_size(config.font_size_adjusted(tab.zoom_adj()));
-+                    let columns = preview_columns(viewport.width, text_size, space_l);
++                    let zoom = zoom_factor(config, tab.zoom_adj());
++                    let columns = preview_columns(viewport.width, text_size, space_l, zoom);
 +                    let mut lead = None;
 +                    if let Some(preview) = tab.markdown.as_mut() {
 +                        mode = Some(preview.mode);
@@ -2740,6 +2755,8 @@ index 0000000..fb46cbf
 +        let cosmic_theme::Spacing {
 +            space_m, space_l, ..
 +        } = theme::spacing();
++        let zoom = zoom_factor(&self.config, tab.zoom_adj());
++        let column = zoom::Column::default();
 +        let viewer = PreviewViewer {
 +            images: &preview.images,
 +            highlights: &preview.highlights,
@@ -2748,6 +2765,8 @@ index 0000000..fb46cbf
 +            entity,
 +            selection: preview.selection,
 +            leaves: RefCell::new(LeafLog::default()),
++            zoom,
++            column: column.clone(),
 +        };
 +        let content = if preview.preparing() {
 +            widget::text::body(fl!("markdown-preparing")).into()
@@ -2764,14 +2783,18 @@ index 0000000..fb46cbf
 +                preview.drawn(),
 +            )
 +        };
-+        let scrollable = widget::scrollable(
++        // The column grows with the zoom, as far as the window allows; text wraps to it
++        let scrollable = widget::scrollable(zoom::PageWidth::new(
 +            widget::container(
 +                widget::container(content)
-+                    .max_width(MAX_WIDTH)
++                    .max_width(MAX_WIDTH * zoom)
 +                    .padding([space_m, space_l]),
 +            )
 +            .center_x(Length::Fill),
-+        )
++            column,
++            MAX_WIDTH,
++            f32::from(space_l),
++        ))
 +        .id(preview.scroll_id.clone())
 +        .on_scroll(move |viewport| {
 +            Message::Scrolled(
@@ -3028,10 +3051,17 @@ index 0000000..fb46cbf
 +    (font_size * 8.0 / 7.0).round()
 +}
 +
++/// How much Ctrl+Plus and Ctrl+Minus scale the preview: its text size against the default.
++/// Exactly 1 at the default zoom.
++fn zoom_factor(config: &crate::Config, zoom_adj: i8) -> f32 {
++    config.font_size_adjusted(zoom_adj) / config.font_size_adjusted(0)
++}
++
 +/// About how many characters of prose fit on a line of a preview `width` wide, with text of
-+/// `text_size` and `padding` on both sides: a character is about half as wide as it is high.
-+fn preview_columns(width: f32, text_size: f32, padding: f32) -> usize {
-+    let text_width = width.min(MAX_WIDTH) - 2.0 * padding;
++/// `text_size`, `padding` on both sides and the column grown by `zoom`: a character is about
++/// half as wide as it is high.
++fn preview_columns(width: f32, text_size: f32, padding: f32, zoom: f32) -> usize {
++    let text_width = width.min(MAX_WIDTH * zoom) - 2.0 * padding;
 +    ((text_width / (text_size * 0.5)).max(0.0) as usize).max(MIN_COLUMNS)
 +}
 +
@@ -3089,6 +3119,10 @@ index 0000000..fb46cbf
 +    entity: Entity,
 +    selection: Option<Selection>,
 +    leaves: RefCell<LeafLog>,
++    /// [`zoom_factor`] of the tab: pictures scale with it.
++    zoom: f32,
++    /// Width of the page column at the default zoom, as last laid out.
++    column: zoom::Column,
 +}
 +
 +/// Numbers the selectable text runs ("leaves") of the preview in the order they are drawn, and
@@ -3273,6 +3307,24 @@ index 0000000..fb46cbf
 +
 +    /// A code block's or table's sideways `scrollable`, scrolling with a selection dragged
 +    /// from inside it to its sides.
++    /// A picture at the tab's zoom. Zoomed in it may be wider than the column: then it scrolls
++    /// sideways on its own, and the rest of the page stays as it is.
++    fn zoomed(&self, picture: zoom::Picture) -> Element<'a, AppMessage> {
++        self.zoom_strip(zoom::Zoomed::new(picture, self.column.clone(), self.zoom))
++    }
++
++    /// `picture` (zoomed) in a sideways scroll strip when zoomed in: the strip is as wide as the
++    /// picture, at most the space it has, and shows a scrollbar only when the picture is wider.
++    /// The mouse wheel still scrolls the page over it.
++    fn zoom_strip(&self, picture: impl Into<Element<'a, AppMessage>>) -> Element<'a, AppMessage> {
++        if self.zoom <= 1.0 {
++            return picture.into();
++        }
++        widget::scrollable(picture)
++            .direction(Direction::Horizontal(Scrollbar::default()))
++            .into()
++    }
++
 +    fn side_scroll(
 +        &self,
 +        scrollable: impl Into<Element<'a, AppMessage>>,
@@ -3432,6 +3484,7 @@ index 0000000..fb46cbf
 +        alt: &Text,
 +    ) -> Element<'a, AppMessage> {
 +        match self.images.get(url) {
++            Some(Some(image)) if self.zoom != 1.0 => self.zoomed(image.picture()),
 +            // Shrink to the content width, never scale up
 +            Some(Some(Image::Raster(handle))) => widget::image(handle.clone())
 +                .content_fit(ContentFit::ScaleDown)
@@ -3462,6 +3515,11 @@ index 0000000..fb46cbf
 +            && mermaid::is_mermaid(language)
 +            && let Some(diagram) = self.diagrams.get(theme::active().cosmic().is_dark, code)
 +        {
++            if self.zoom != 1.0 {
++                return widget::container(self.zoomed(zoom::Picture::Vector(diagram)))
++                    .center_x(Length::Fill)
++                    .into();
++            }
 +            return widget::container(
 +                widget::svg(diagram)
 +                    .width(Length::Shrink)
@@ -3540,6 +3598,8 @@ index 0000000..fb46cbf
 +    // - each tab keeps its own preview scroll offset and restores it when shown again
 +    // - Split re-parses after 150 ms, after 300 ms for documents over 100 KB
 +    // - links resolve against the file's folder; a click never runs anything
++    // - the zoom factor is 1 at the default zoom and follows the text size; the page column
++    //   grows with it, as far as the window allows
 +
 +    use super::*;
 +    use std::time::Duration;
@@ -4046,13 +4106,27 @@ index 0000000..fb46cbf
 +    }
 +
 +    #[test]
++    fn zoom_factor_follows_the_text_size() {
++        let config = crate::Config::default();
++        assert_eq!(zoom_factor(&config, 0), 1.0);
++        let step = config.font_size_adjusted(1) / config.font_size_adjusted(0);
++        assert!(step > 1.0);
++        assert_eq!(zoom_factor(&config, 1), step);
++        assert!(zoom_factor(&config, -1) < 1.0);
++    }
++
++    #[test]
 +    fn preview_columns_follow_width_and_font() {
 +        // 800 px less 2 x 32 px padding, 8 px per character of 16 px text
-+        assert_eq!(preview_columns(800.0, 16.0, 32.0), 92);
-+        assert_eq!(preview_columns(400.0, 16.0, 32.0), 42);
++        assert_eq!(preview_columns(800.0, 16.0, 32.0, 1.0), 92);
++        assert_eq!(preview_columns(400.0, 16.0, 32.0, 1.0), 42);
 +        // Wider than the preview's maximum width: no more columns
-+        assert_eq!(preview_columns(2000.0, 16.0, 32.0), 99);
-+        assert_eq!(preview_columns(10.0, 16.0, 32.0), MIN_COLUMNS);
++        assert_eq!(preview_columns(2000.0, 16.0, 32.0, 1.0), 99);
++        assert_eq!(preview_columns(10.0, 16.0, 32.0, 1.0), MIN_COLUMNS);
++        // Zoomed, the maximum width grows with the text: about as many columns as before
++        assert_eq!(preview_columns(2000.0, 32.0, 32.0, 2.0), 103);
++        // ... but the window still limits it
++        assert_eq!(preview_columns(800.0, 32.0, 32.0, 2.0), 46);
 +        // A narrow preview wraps the long line to more lines, so later lines sit further down
 +        let mut preview = Preview::new(ViewMode::Split);
 +        let text = format!("{}\n\nEnd\n", "word ".repeat(80).trim_end());
@@ -5117,10 +5191,10 @@ index 0000000..551a1e1
 +}
 diff --git a/src/markdown_html.rs b/src/markdown_html.rs
 new file mode 100644
-index 0000000..31d2b54
+index 0000000..09c4f45
 --- /dev/null
 +++ b/src/markdown_html.rs
-@@ -0,0 +1,2443 @@
+@@ -0,0 +1,2454 @@
 +// SPDX-License-Identifier: GPL-3.0-only
 +
 +//! What the iced Markdown widget leaves out of the preview, for GitHub style READMEs: images inside
@@ -6850,24 +6924,35 @@ index 0000000..31d2b54
 +        picture: &'a Picture,
 +        settings: Settings,
 +    ) -> Element<'a, AppMessage> {
-+        let width = picture.width.map_or(Length::Shrink, Length::Fixed);
-+        let height = picture.height.map_or(Length::Shrink, Length::Fixed);
++        // The size the HTML asks for grows with the zoom, as the text does
++        let width = picture
++            .width
++            .map_or(Length::Shrink, |width| Length::Fixed(width * self.zoom));
++        let height = picture
++            .height
++            .map_or(Length::Shrink, |height| Length::Fixed(height * self.zoom));
 +        let fit = if picture.width.is_some() || picture.height.is_some() {
 +            ContentFit::Contain
 +        } else {
 +            ContentFit::ScaleDown
 +        };
 +        match self.images.get(&picture.url) {
-+            Some(Some(Image::Raster(handle))) => widget::image(handle.clone())
-+                .width(width)
-+                .height(height)
-+                .content_fit(fit)
-+                .into(),
-+            Some(Some(Image::Vector(handle))) => widget::svg(handle.clone())
-+                .width(width)
-+                .height(height)
-+                .content_fit(fit)
-+                .into(),
++            // Without a size: as wide as at the default zoom times the zoom
++            Some(Some(image)) if fit == ContentFit::ScaleDown && self.zoom != 1.0 => {
++                self.zoomed(image.picture())
++            }
++            Some(Some(Image::Raster(handle))) => self.zoom_strip(
++                widget::image(handle.clone())
++                    .width(width)
++                    .height(height)
++                    .content_fit(fit),
++            ),
++            Some(Some(Image::Vector(handle))) => self.zoom_strip(
++                widget::svg(handle.clone())
++                    .width(width)
++                    .height(height)
++                    .content_fit(fit),
++            ),
 +            _ => {
 +                let alt = if picture.alt.is_empty() {
 +                    picture.url.rsplit('/').next().unwrap_or_default()
@@ -9188,6 +9273,334 @@ index 0000000..ce66a6c
 +        assert_eq!(host("https://example.com/a/b.png?x=1"), "example.com");
 +        assert_eq!(host("https://user:secret@example.com/a.png"), "example.com");
 +        assert_eq!(host("https://example.com"), "example.com");
++    }
++}
+diff --git a/src/markdown_zoom.rs b/src/markdown_zoom.rs
+new file mode 100644
+index 0000000..f9f3077
+--- /dev/null
++++ b/src/markdown_zoom.rs
+@@ -0,0 +1,322 @@
++// SPDX-License-Identifier: GPL-3.0-only
++
++//! Zoom for the pictures of the Markdown preview: Ctrl+Plus and Ctrl+Minus scale images and
++//! Mermaid diagrams together with the text.
++//!
++//! A picture's zoomed size is its size at the default zoom times the zoom factor. At the default
++//! zoom a picture shrinks to the page column and never grows past its own size; that column's
++//! width depends on the window, which [`PageWidth`] records while the page is laid out, before
++//! the pictures in it.
++
++use cosmic::iced::advanced::widget::{Operation, Tree, tree};
++use cosmic::iced::advanced::{Clipboard, Layout, Shell, Widget, layout, overlay, renderer};
++use cosmic::iced::{Event, Length, Rectangle, Size, Vector, mouse};
++use cosmic::iced::advanced::{image::Renderer as _, svg::Renderer as _};
++use cosmic::widget::{image, svg};
++use cosmic::{Element, Renderer, Theme};
++use std::cell::Cell;
++use std::rc::Rc;
++
++/// Width of the page column at the default zoom, written by [`PageWidth`] and read by
++/// [`Zoomed`] in the same layout pass; 0 before the first.
++pub type Column = Rc<Cell<f32>>;
++
++/// The size of a picture of `natural` size at `zoom`: as wide as at the default zoom (at most
++/// its own width and the `column`) times `zoom`, keeping its aspect ratio, and never wider than
++/// `available` (infinite in a sideways scroll strip).
++pub fn zoomed_size(natural: Size, column: f32, zoom: f32, available: f32) -> Size {
++    if natural.width <= 0.0 || natural.height <= 0.0 {
++        return Size::ZERO;
++    }
++    let width = (natural.width.min(column.max(0.0)) * zoom).min(available);
++    Size::new(width, natural.height * width / natural.width)
++}
++
++/// Lays out `content` (the page column) and records the width the page column has at the
++/// default zoom: the width given to it, at most `max_width`, less the `padding` on both sides.
++pub struct PageWidth<'a, Message> {
++    content: Element<'a, Message>,
++    column: Column,
++    max_width: f32,
++    padding: f32,
++}
++
++impl<'a, Message> PageWidth<'a, Message> {
++    pub fn new(
++        content: impl Into<Element<'a, Message>>,
++        column: Column,
++        max_width: f32,
++        padding: f32,
++    ) -> Self {
++        Self {
++            content: content.into(),
++            column,
++            max_width,
++            padding,
++        }
++    }
++}
++
++impl<Message> Widget<Message, Theme, Renderer> for PageWidth<'_, Message> {
++    // Transparent: the tree is the content's own
++    fn tag(&self) -> tree::Tag {
++        self.content.as_widget().tag()
++    }
++
++    fn state(&self) -> tree::State {
++        self.content.as_widget().state()
++    }
++
++    fn children(&self) -> Vec<Tree> {
++        self.content.as_widget().children()
++    }
++
++    fn diff(&mut self, tree: &mut Tree) {
++        self.content.as_widget_mut().diff(tree);
++    }
++
++    fn size(&self) -> Size<Length> {
++        self.content.as_widget().size()
++    }
++
++    fn size_hint(&self) -> Size<Length> {
++        self.content.as_widget().size_hint()
++    }
++
++    fn layout(
++        &mut self,
++        tree: &mut Tree,
++        renderer: &Renderer,
++        limits: &layout::Limits,
++    ) -> layout::Node {
++        let width = limits.max().width.min(self.max_width) - 2.0 * self.padding;
++        self.column.set(width.max(0.0));
++        self.content.as_widget_mut().layout(tree, renderer, limits)
++    }
++
++    fn draw(
++        &self,
++        tree: &Tree,
++        renderer: &mut Renderer,
++        theme: &Theme,
++        style: &renderer::Style,
++        layout: Layout<'_>,
++        cursor: mouse::Cursor,
++        viewport: &Rectangle,
++    ) {
++        self.content
++            .as_widget()
++            .draw(tree, renderer, theme, style, layout, cursor, viewport);
++    }
++
++    fn operate(
++        &mut self,
++        tree: &mut Tree,
++        layout: Layout<'_>,
++        renderer: &Renderer,
++        operation: &mut dyn Operation,
++    ) {
++        self.content
++            .as_widget_mut()
++            .operate(tree, layout, renderer, operation);
++    }
++
++    fn update(
++        &mut self,
++        tree: &mut Tree,
++        event: &Event,
++        layout: Layout<'_>,
++        cursor: mouse::Cursor,
++        renderer: &Renderer,
++        clipboard: &mut dyn Clipboard,
++        shell: &mut Shell<'_, Message>,
++        viewport: &Rectangle,
++    ) {
++        self.content.as_widget_mut().update(
++            tree, event, layout, cursor, renderer, clipboard, shell, viewport,
++        );
++    }
++
++    fn mouse_interaction(
++        &self,
++        tree: &Tree,
++        layout: Layout<'_>,
++        cursor: mouse::Cursor,
++        viewport: &Rectangle,
++        renderer: &Renderer,
++    ) -> mouse::Interaction {
++        self.content
++            .as_widget()
++            .mouse_interaction(tree, layout, cursor, viewport, renderer)
++    }
++
++    fn overlay<'b>(
++        &'b mut self,
++        tree: &'b mut Tree,
++        layout: Layout<'b>,
++        renderer: &Renderer,
++        viewport: &Rectangle,
++        translation: Vector,
++    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
++        self.content
++            .as_widget_mut()
++            .overlay(tree, layout, renderer, viewport, translation)
++    }
++}
++
++impl<'a, Message: 'a> From<PageWidth<'a, Message>> for Element<'a, Message> {
++    fn from(page: PageWidth<'a, Message>) -> Self {
++        Element::new(page)
++    }
++}
++
++/// A picture to zoom.
++#[derive(Clone)]
++pub enum Picture {
++    Raster(image::Handle),
++    Vector(svg::Handle),
++}
++
++/// A picture drawn at its [`zoomed_size`].
++pub struct Zoomed<'a, Message> {
++    picture: Picture,
++    content: Element<'a, Message>,
++    column: Column,
++    zoom: f32,
++}
++
++impl<'a, Message: 'a> Zoomed<'a, Message> {
++    pub fn new(picture: Picture, column: Column, zoom: f32) -> Self {
++        // Fills the size the layout gives it
++        let content = match &picture {
++            Picture::Raster(handle) => image(handle.clone())
++                .width(Length::Fill)
++                .height(Length::Fill)
++                .content_fit(cosmic::iced::ContentFit::Fill)
++                .into(),
++            Picture::Vector(handle) => svg(handle.clone())
++                .width(Length::Fill)
++                .height(Length::Fill)
++                .content_fit(cosmic::iced::ContentFit::Fill)
++                .into(),
++        };
++        Self {
++            picture,
++            content,
++            column,
++            zoom,
++        }
++    }
++}
++
++impl<Message> Widget<Message, Theme, Renderer> for Zoomed<'_, Message> {
++    fn tag(&self) -> tree::Tag {
++        self.content.as_widget().tag()
++    }
++
++    fn state(&self) -> tree::State {
++        self.content.as_widget().state()
++    }
++
++    fn children(&self) -> Vec<Tree> {
++        self.content.as_widget().children()
++    }
++
++    fn diff(&mut self, tree: &mut Tree) {
++        self.content.as_widget_mut().diff(tree);
++    }
++
++    fn size(&self) -> Size<Length> {
++        Size::new(Length::Shrink, Length::Shrink)
++    }
++
++    fn layout(
++        &mut self,
++        tree: &mut Tree,
++        renderer: &Renderer,
++        limits: &layout::Limits,
++    ) -> layout::Node {
++        let natural = match &self.picture {
++            Picture::Raster(handle) => renderer.measure_image(handle).unwrap_or_default(),
++            Picture::Vector(handle) => renderer.measure_svg(handle),
++        };
++        let natural = Size::new(natural.width as f32, natural.height as f32);
++        let size = zoomed_size(natural, self.column.get(), self.zoom, limits.max().width);
++        let node = self.content.as_widget_mut().layout(
++            tree,
++            renderer,
++            &layout::Limits::new(size, size),
++        );
++        layout::Node::with_children(size, vec![node])
++    }
++
++    fn draw(
++        &self,
++        tree: &Tree,
++        renderer: &mut Renderer,
++        theme: &Theme,
++        style: &renderer::Style,
++        layout: Layout<'_>,
++        cursor: mouse::Cursor,
++        viewport: &Rectangle,
++    ) {
++        if let Some(content) = layout.children().next() {
++            self.content
++                .as_widget()
++                .draw(tree, renderer, theme, style, content, cursor, viewport);
++        }
++    }
++}
++
++impl<'a, Message: 'a> From<Zoomed<'a, Message>> for Element<'a, Message> {
++    fn from(zoomed: Zoomed<'a, Message>) -> Self {
++        Element::new(zoomed)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    // Behaviours covered:
++    // - at the default zoom a picture keeps its size, or shrinks to the column, never grows
++    // - zoomed, it is its default-zoom size times the factor, also wider than the column and its
++    //   own size, keeping its aspect ratio
++    // - zoomed out, it shrinks by the factor too
++    // - it never gets wider than the space it has (infinite in a scroll strip)
++    // - a picture without a size takes no space
++    use super::*;
++
++    #[test]
++    fn default_zoom_keeps_size_or_shrinks_to_column() {
++        let small = zoomed_size(Size::new(200.0, 100.0), 800.0, 1.0, 800.0);
++        assert_eq!(small, Size::new(200.0, 100.0));
++        let wide = zoomed_size(Size::new(1600.0, 800.0), 800.0, 1.0, 800.0);
++        assert_eq!(wide, Size::new(800.0, 400.0));
++    }
++
++    #[test]
++    fn zoom_in_scales_the_default_size() {
++        let small = zoomed_size(Size::new(200.0, 100.0), 800.0, 2.0, f32::INFINITY);
++        assert_eq!(small, Size::new(400.0, 200.0));
++        // Wider than the column and than the picture itself
++        let wide = zoomed_size(Size::new(1000.0, 500.0), 800.0, 1.5, f32::INFINITY);
++        assert_eq!(wide, Size::new(1200.0, 600.0));
++    }
++
++    #[test]
++    fn zoom_out_shrinks_by_the_factor() {
++        let wide = zoomed_size(Size::new(1600.0, 800.0), 800.0, 0.5, 600.0);
++        assert_eq!(wide, Size::new(400.0, 200.0));
++    }
++
++    #[test]
++    fn never_wider_than_the_space() {
++        let wide = zoomed_size(Size::new(1600.0, 800.0), 800.0, 0.9, 500.0);
++        assert_eq!(wide, Size::new(500.0, 250.0));
++    }
++
++    #[test]
++    fn picture_without_size_takes_no_space() {
++        assert_eq!(zoomed_size(Size::new(0.0, 0.0), 800.0, 2.0, 800.0), Size::ZERO);
++        assert_eq!(zoomed_size(Size::new(10.0, 0.0), 800.0, 2.0, 800.0), Size::ZERO);
 +    }
 +}
 diff --git a/src/selectable_rich.rs b/src/selectable_rich.rs

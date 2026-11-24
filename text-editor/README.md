@@ -49,6 +49,7 @@ Every Markdown tab has three views. Pick one with the three buttons at the right
 | Ctrl+Shift+V | Switch between Preview and Source |
 | Ctrl+Alt+V | Switch between Split and Source |
 | Ctrl+Alt+1 / 2 / 3 | Source / Split / Preview |
+| Ctrl+Plus / Ctrl+Minus | Zoom text and images; wide images scroll sideways |
 
 The preview shows headings, lists, task lists, tables, code blocks and local images, and the HTML
 that READMEs use: centred logos, badge rows, fold-out `<details>` sections, GitHub alerts
