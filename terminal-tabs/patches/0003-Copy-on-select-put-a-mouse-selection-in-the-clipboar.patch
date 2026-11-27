@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jens Willmer <info@jwillmer.de>
+Date: Fri, 27 Nov 2026 14:53:57 +0100
+Subject: [PATCH 3/3] Copy on select: put a mouse selection in the clipboard
+ too
+
+Off by default. On while ~/.config/term-tabs/copy-on-select exists
+($XDG_CONFIG_HOME respected), checked on each mouse release.
+
+diff --git a/src/copy_on_select.rs b/src/copy_on_select.rs
+new file mode 100644
+index 0000000..5e9ea59
+--- /dev/null
++++ b/src/copy_on_select.rs
+@@ -0,0 +1,66 @@
++//! Copy on select: a finished mouse selection also goes to the clipboard, not only to the
++//! primary selection (middle-click paste). Off by default; on while the file
++//! `$XDG_CONFIG_HOME/term-tabs/copy-on-select` exists (`~/.config/...` when XDG_CONFIG_HOME is
++//! unset). Checked on every mouse release, so creating or removing the file takes effect at once.
++
++use std::{env, ffi::OsString, path::PathBuf};
++
++/// Path of the switch file, from the values of XDG_CONFIG_HOME and HOME.
++fn switch_path(xdg_config_home: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
++    let base = match xdg_config_home.filter(|v| !v.is_empty()) {
++        Some(dir) => PathBuf::from(dir),
++        None => PathBuf::from(home.filter(|v| !v.is_empty())?).join(".config"),
++    };
++    Some(base.join("term-tabs").join("copy-on-select"))
++}
++
++/// True when copy on select is switched on.
++pub fn enabled() -> bool {
++    is_on(switch_path(env::var_os("XDG_CONFIG_HOME"), env::var_os("HOME")))
++}
++
++fn is_on(path: Option<PathBuf>) -> bool {
++    path.is_some_and(|p| p.exists())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn uses_xdg_config_home() {
++        assert_eq!(
++            switch_path(Some("/cfg".into()), Some("/home/demo".into())),
++            Some(PathBuf::from("/cfg/term-tabs/copy-on-select"))
++        );
++    }
++
++    #[test]
++    fn falls_back_to_home_config() {
++        assert_eq!(
++            switch_path(None, Some("/home/demo".into())),
++            Some(PathBuf::from("/home/demo/.config/term-tabs/copy-on-select"))
++        );
++        assert_eq!(
++            switch_path(Some("".into()), Some("/home/demo".into())),
++            Some(PathBuf::from("/home/demo/.config/term-tabs/copy-on-select"))
++        );
++    }
++
++    #[test]
++    fn no_home_means_off() {
++        assert_eq!(switch_path(None, None), None);
++    }
++
++    #[test]
++    fn switch_file_turns_it_on() {
++        let dir = env::temp_dir().join(format!("copy-on-select-test-{}", std::process::id()));
++        let path = switch_path(Some(dir.clone().into()), None).unwrap();
++        assert!(!is_on(Some(path.clone())));
++        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
++        std::fs::write(&path, "").unwrap();
++        assert!(is_on(Some(path)));
++        assert!(!is_on(None));
++        std::fs::remove_dir_all(&dir).unwrap();
++    }
++}
+diff --git a/src/main.rs b/src/main.rs
+index 1721bf6..935fcd0 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -83,6 +83,8 @@ mod dnd;
+ 
+ mod tab_publisher;
+ 
++mod copy_on_select;
++
+ use clap_lex::RawArgs;
+ 
+ static ICON_CACHE: LazyLock<Mutex<IconCache>> = LazyLock::new(|| Mutex::new(IconCache::new()));
+@@ -2271,6 +2273,13 @@ impl Application for App {
+                         let terminal = terminal.lock().unwrap();
+                         let term = terminal.term.lock();
+                         if let Some(text) = term.selection_to_string() {
++                            if copy_on_select::enabled() {
++                                return Task::batch([
++                                    clipboard::write(text.clone()),
++                                    clipboard::write_primary(text),
++                                    self.update_focus(),
++                                ]);
++                            }
+                             return Task::batch([
+                                 clipboard::write_primary(text),
+                                 self.update_focus(),
