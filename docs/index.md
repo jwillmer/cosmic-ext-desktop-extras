@@ -59,7 +59,8 @@ Workspace Keeper.
 
 Add-ons for the taskbar: it shows "3 tabs" for COSMIC Terminal windows, and "2 tabs" or "14 items"
 for COSMIC Files windows. The patched Files also gives a folder its own icon, with a code folder
-icon for your projects.
+icon for your projects. The patched Terminal can copy a mouse selection straight to the clipboard
+(optional).
 
 ![COSMIC Files on the home folder: the standard folders with their icons, and projects with the code folder icon](media/files-folder-icon.svg)
 

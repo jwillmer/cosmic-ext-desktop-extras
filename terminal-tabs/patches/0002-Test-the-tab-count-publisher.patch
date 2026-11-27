@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jens Willmer <info@jwillmer.de>
 Date: Tue, 10 Nov 2026 17:44:44 +0100
-Subject: [PATCH 2/2] Test the tab count publisher
+Subject: [PATCH 2/3] Test the tab count publisher
 
 Make the target directory injectable for tests (TabPublisher::with_dir) and
 cover the JSON output, title escaping, the written file, skipping unchanged

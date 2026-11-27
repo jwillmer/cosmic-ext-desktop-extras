@@ -40,7 +40,7 @@ Add-ons for the COSMIC desktop on Pop!_OS 24.04, installed per user:
 | Tool name | Folder | Kind | What it does |
 |---|---|---|---|
 | `taskbar` | `taskbar/` | Rust, patches on `pop-os/cosmic-applets` | Windows-style taskbar (patched "Minimized Windows" applet) and a patched App List |
-| `terminal-tabs` | `terminal-tabs/` | Rust, patches on `pop-os/cosmic-term` | Terminal writes tab counts for the taskbar |
+| `terminal-tabs` | `terminal-tabs/` | Rust, patches on `pop-os/cosmic-term` | Terminal writes tab counts for the taskbar; optional copy on select |
 | `files-tabs` | `files-tabs/` | Rust, patches on `pop-os/cosmic-files` | Files writes tab and item counts for the taskbar |
 | `tray-colors` | `tray-colors/` | Rust, patch on `pop-os/cosmic-applets` | Tray icons keep their colours |
 | `text-editor` | `text-editor/` | Rust, patches on `pop-os/cosmic-edit` (and one on `pop-os/cosmic-files`) | Text Editor: Markdown views, one window, session restore with drafts, change history |

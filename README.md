@@ -67,6 +67,10 @@ windows.
 `.directory` file inside the folder (as in KDE's Dolphin). It comes with a code folder icon for
 your projects folder.
 
+**Copy on select in Terminal.** Optional: text selected with the mouse in the patched Terminal
+goes straight to the clipboard. Other apps are left alone, so Ctrl+A in a browser field never
+overwrites what you copied ([how to turn it on](terminal-tabs/README.md#settings)).
+
 [![COSMIC Files on the home folder: the standard folders with their icons, and projects with the code folder icon](docs/media/files-folder-icon.svg)](files-tabs/README.md#folder-icons)
 
 Install: `./install.sh terminal-tabs files-tabs` ·
@@ -248,7 +252,7 @@ known limits.
 | Page | For |
 |---|---|
 | [taskbar/README.md](taskbar/README.md) | Taskbar features and settings |
-| [terminal-tabs/README.md](terminal-tabs/README.md) | Terminal tab counts |
+| [terminal-tabs/README.md](terminal-tabs/README.md) | Terminal tab counts, copy on select |
 | [files-tabs/README.md](files-tabs/README.md) | Files tab counts and folder icons |
 | [tray-colors/README.md](tray-colors/README.md) | Tray colors |
 | [text-editor/README.md](text-editor/README.md) | Text Editor |

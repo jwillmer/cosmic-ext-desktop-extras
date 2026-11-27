@@ -18,6 +18,17 @@ otherwise. User overview: [terminal-tabs/README.md](../terminal-tabs/README.md).
   removed when the terminal exits.
 - The taskbar matches the file's entries to windows by title.
 
+### Copy on select
+
+- `src/copy_on_select.rs` (patch 0003). On every left mouse release, cosmic-term already writes
+  the selection to the primary selection (middle-click paste). With the switch on, it writes it to
+  the clipboard as well.
+- Switch: the file `$XDG_CONFIG_HOME/term-tabs/copy-on-select` (`~/.config/...` when unset)
+  exists. It is checked on each release (one `stat`), so no restart is needed.
+- Why inside the terminal and not a global `wl-paste --primary --watch wl-copy`: a global watcher
+  copies every selection in every app, so Ctrl+A in a browser field to clear it overwrites the
+  clipboard you were about to paste.
+
 ## Installed files
 
 `terminal-tabs/build.sh` (run by `./install.sh terminal-tabs`) installs:
@@ -42,7 +53,9 @@ Needs the same Rust toolchain as the taskbar, see [taskbar](taskbar.md#commands)
 
 ## Configuration
 
-None.
+| File | Effect |
+|---|---|
+| `~/.config/term-tabs/copy-on-select` | Exists: mouse selections also go to the clipboard. Content is ignored. |
 
 ## Limits
 
